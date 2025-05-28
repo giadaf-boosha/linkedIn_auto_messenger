@@ -34,9 +34,7 @@
     /* Esempio: --background: oklch(0.09 0.004 49.25); */
     /* ... e così via per le altre variabili ... */
   }
-}
 
-@layer base {
   /* Rimuoviamo la regola globale per border-border per evitare l'errore di build */
   /* * {
     @apply border-border;

@@ -19,9 +19,20 @@ export default async function handler(req, res) {
     const isDev = process.env.NODE_ENV !== 'production';
     const launchOptions = isDev
       ? {
-          headless: true,
+          headless: 'new',
           executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-          args: ['--no-sandbox', '--disable-setuid-sandbox']
+          args: [
+            '--no-sandbox', 
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
+            '--no-zygote',
+            '--disable-gpu',
+            '--disable-extensions',
+            '--disable-background-timer-throttling',
+            '--disable-backgrounding-occluded-windows',
+            '--disable-renderer-backgrounding'
+          ]
         }
       : {
           args: chrome.args,
@@ -31,10 +42,21 @@ export default async function handler(req, res) {
         };
     browser = await puppeteer.launch(launchOptions);
     const page = await browser.newPage();
-    // Extend default navigation and operation timeouts to 60s
-    const navTimeout = 60000;
+    
+    // Riduci i timeout e ottimizza le prestazioni
+    const navTimeout = 30000; // Ridotto da 60s a 30s
     page.setDefaultNavigationTimeout(navTimeout);
     page.setDefaultTimeout(navTimeout);
+    
+    // Ottimizza il caricamento delle pagine
+    await page.setRequestInterception(true);
+    page.on('request', (req) => {
+      if(req.resourceType() == 'stylesheet' || req.resourceType() == 'font' || req.resourceType() == 'image'){
+        req.abort();
+      } else {
+        req.continue();
+      }
+    });
 
     // Parse cookies input (stringified JSON or already array)
     let cookieArrayRaw;
@@ -54,352 +76,51 @@ export default async function handler(req, res) {
       return rest;
     });
     await page.setCookie(...cookieArray);
-    await page.goto('https://www.linkedin.com/feed', { waitUntil: 'domcontentloaded', timeout: navTimeout });
+    
+    // Prova prima ad andare al feed per verificare l'autenticazione
+    try {
+      await page.goto('https://www.linkedin.com/feed', { waitUntil: 'domcontentloaded', timeout: navTimeout });
+    } catch (error) {
+      console.warn('Feed navigation failed, continuing with direct profile access...');
+    }
 
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
     const results = [];
 
-    // Funzione per lo scrolling automatico della pagina per caricare tutto il contenuto
-    const autoScroll = async (page) => {
-      await page.evaluate(async () => {
-        await new Promise((resolve) => {
-          let totalHeight = 0;
-          const distance = 100;
-          const timer = setInterval(() => {
-            const scrollHeight = document.body.scrollHeight;
-            window.scrollBy(0, distance);
-            totalHeight += distance;
+    // Funzione per lo scrolling ottimizzato
+    const optimizedScroll = async (page) => {
+      try {
+        await page.evaluate(async () => {
+          await new Promise((resolve) => {
+            let totalHeight = 0;
+            const distance = 200; // Aumentato per scroll più veloce
+            const maxScrolls = 10; // Limite massimo di scroll
+            let scrollCount = 0;
             
-            if (totalHeight >= scrollHeight) {
-              clearInterval(timer);
-              resolve();
-            }
-          }, 100);
+            const timer = setInterval(() => {
+              const scrollHeight = document.body.scrollHeight;
+              window.scrollBy(0, distance);
+              totalHeight += distance;
+              scrollCount++;
+              
+              if (totalHeight >= scrollHeight || scrollCount >= maxScrolls) {
+                clearInterval(timer);
+                resolve();
+              }
+            }, 50); // Ridotto l'intervallo per scroll più veloce
+          });
         });
-      });
+      } catch (error) {
+        console.warn('Scroll failed:', error.message);
+      }
     };
 
-    if (profileUrl) {
-      // Single profile preview: navigate and extract detailed profile info
-      await page.goto(profileUrl, { waitUntil: 'domcontentloaded', timeout: navTimeout });
-      await page.waitForSelector('h1', { timeout: navTimeout });
-      // Extract core profile fields
-      const profileData = await page.evaluate(() => {
-        // helper to select first non-empty text from selectors
-        const selectText = (selectors) => {
-          for (const sel of selectors) {
-            const el = document.querySelector(sel);
-            if (el && el.innerText) {
-              const txt = el.innerText.trim();
-              if (txt) return txt;
-            }
-          }
-          return '';
-        };
-        const name = selectText(['h1.text-heading-xlarge', 'h1.inline.t-24', 'h1']);
-        const headline = selectText(['div.text-body-medium', 'h2', 'span.text-body-medium.break-words']);
-        const location = selectText(['span.text-body-small.inline.t-black--light', 'span.t-16.t-normal']);
-        const profileSummary = selectText([
-          'section.pv-about-section .pv-about__summary-text',
-          'section.pv-about-section p',
-          'section[id*="about"]'
-        ]);
-        // extract skills
-        const skills = Array.from(
-          document.querySelectorAll(
-            'span.pv-skill-category-entity__name-text, span.pv-skill-entity__skill-name-text'
-          )
-        ).map(el => el.innerText.trim()).filter(Boolean);
-        // derive jobTitle and companyName from headline if pattern
-        let jobTitle = '';
-        let companyName = '';
-        if (/\bat\b/i.test(headline)) {
-          const parts = headline.split(/\bat\b/i);
-          jobTitle = (parts[0] || '').trim();
-          companyName = (parts[1] || '').trim();
-        } else if (headline.includes('@')) {
-          const parts = headline.split('@');
-          jobTitle = (parts[0] || '').trim();
-          companyName = (parts[1] || '').trim();
-        }
-        return { name, headline, location, profileSummary, skills, jobTitle, companyName };
-      });
-
-      // Modifico con una versione migliorata che estrae più dati
-      await page.goto(profileUrl, { waitUntil: 'networkidle2', timeout: navTimeout });
-      await page.waitForSelector('h1', { timeout: navTimeout });
-      
-      // Scorri la pagina per caricare tutti i contenuti
-      await autoScroll(page);
-      
-      // Estrai dati profilo base in modo più completo
-      const enhancedProfileData = await page.evaluate(() => {
-        // helper to select first non-empty text from selectors
-        const selectText = (selectors) => {
-          for (const sel of selectors) {
-            const el = document.querySelector(sel);
-            if (el && el.innerText) {
-              const txt = el.innerText.trim();
-              if (txt) return txt;
-            }
-          }
-          return '';
-        };
-        
-        const selectMultiple = (selector) => {
-          const elements = document.querySelectorAll(selector);
-          return Array.from(elements).map(el => el.innerText.trim()).filter(Boolean);
-        };
-        
-        const name = selectText(['h1.text-heading-xlarge', 'h1.inline.t-24', 'h1']);
-        const headline = selectText(['div.text-body-medium', 'h2', 'span.text-body-medium.break-words']);
-        const location = selectText(['span.text-body-small.inline.t-black--light', 'span.t-16.t-normal']);
-        
-        // Estrai riepilogo profilo più completo
-        const profileSummary = selectText([
-          'section.pv-about-section .pv-about__summary-text',
-          'section.pv-about-section p',
-          'section[id*="about"] .display-flex p',
-          'section[id*="about"]'
-        ]);
-        
-        // Estrai tutte le competenze
-        const skills = Array.from(
-          document.querySelectorAll(
-            'span.pv-skill-category-entity__name-text, span.pv-skill-entity__skill-name-text, li.skill-entity'
-          )
-        ).map(el => el.innerText.trim()).filter(Boolean);
-        
-        // Estrai endorsements e raccomandazioni
-        const endorsements = document.querySelector('div.pv-skills-section__endorsement-count') 
-          ? document.querySelector('div.pv-skills-section__endorsement-count').innerText 
-          : '';
-        
-        // Numero di connessioni
-        const connectionsText = selectText(['.pv-top-card--list .t-black--light', 'span.t-bold:contains("connessioni")']);
-        const connections = connectionsText.match(/\d+/) ? connectionsText.match(/\d+/)[0] : '';
-        
-        // derive jobTitle and companyName from headline if pattern
-        let jobTitle = '';
-        let companyName = '';
-        if (/\bat\b/i.test(headline)) {
-          const parts = headline.split(/\bat\b/i);
-          jobTitle = (parts[0] || '').trim();
-          companyName = (parts[1] || '').trim();
-        } else if (headline.includes('@')) {
-          const parts = headline.split('@');
-          jobTitle = (parts[0] || '').trim();
-          companyName = (parts[1] || '').trim();
-        }
-        
-        // Estrai lingue conosciute
-        const languages = selectMultiple('li.languages__list-item h3, section[id*="languages"] li span.t-bold');
-        
-        // Estrai interessi
-        const interests = selectMultiple('section[id*="interest"] li span.t-bold, .pv-interests-section h3');
-        
-        // Estrai certificazioni
-        const certifications = selectMultiple('section[id*="certifications"] li .t-bold, section[id*="certifications"] .t-bold span');
-        
-        return { 
-          name, 
-          headline, 
-          location, 
-          profileSummary, 
-          skills, 
-          jobTitle, 
-          companyName,
-          connections,
-          endorsements,
-          languages,
-          interests,
-          certifications
-        };
-      });
-      
-      // Estrai tutte le esperienze lavorative in modo dettagliato
-      const jobsCollection = await page.evaluate(() => {
-        const select = el => el ? el.innerText.trim() : '';
-        const jobs = [];
-        
-        // Cerca la sezione delle esperienze
-        let section = document.querySelector('section[id*="experience"]') || document.querySelector('section.experience-section');
-        if (!section) {
-          const hdr = Array.from(document.querySelectorAll('h2')).find(h => /esperienza|experience/i.test(h.innerText));
-          section = hdr ? hdr.closest('section') : null;
-        }
-        
-        if (section) {
-          // Seleziona tutte le esperienze lavorative
-          const jobEls = section.querySelectorAll('li.artdeco-list__item, div.pvs-entity, .pv-entity__position-group');
-          
-          // Estrai informazioni per ciascuna esperienza (limita a 3 per prestazioni)
-          Array.from(jobEls).slice(0, 3).forEach(jobEl => {
-            let title = select(jobEl.querySelector('.pv-entity__summary-info h3, .t-bold span, span.mr1.t-bold'));
-            let company = select(jobEl.querySelector('.pv-entity__secondary-title, span.t-14.t-normal, .t-black--light span:not(.visually-hidden)'));
-            
-            // Estrai URL azienda
-            const companyUrl = jobEl.querySelector('a[href*="/company/"]')?.href || '';
-            
-            // Estrai date e durata
-            let dateRange = '';
-            let duration = '';
-            let location = '';
-            
-            const dateEls = Array.from(jobEl.querySelectorAll('span.t-14.t-normal.t-black--light, span.t-12.t-normal.t-black--light, .pv-entity__date-range span:not(:first-child)'));
-            for (const el of dateEls) {
-              const txt = select(el);
-              if (!dateRange && /\d{4}/.test(txt)) dateRange = txt;
-              else if (!duration && /\d+\s+(anno|year|mese|month)/i.test(txt)) duration = txt;
-              else if (!location && !/\d/.test(txt) && txt.length > 1) location = txt;
-            }
-            
-            // Descrizione del ruolo
-            const description = select(jobEl.querySelector('div.pv-entity__description, div.inline-show-more-text, .pvs-list__outer-container .pvs-list'));
-            
-            // Aggiungi solo se il titolo o l'azienda non sono vuoti
-            if (title || company) {
-              jobs.push({
-                title,
-                company,
-                companyUrl,
-                dateRange,
-                duration,
-                location,
-                description
-              });
-            }
-          });
-        }
-        return jobs;
-      });
-      
-      // Estrai tutte le esperienze formative in modo dettagliato
-      const educationCollection = await page.evaluate(() => {
-        const select = el => el ? el.innerText.trim() : '';
-        const schools = [];
-        
-        // Cerca la sezione della formazione
-        let section = document.querySelector('section[id*="education"]') || document.querySelector('section.education-section');
-        if (!section) {
-          const hdr = Array.from(document.querySelectorAll('h2')).find(h => /formazione|education/i.test(h.innerText));
-          section = hdr ? hdr.closest('section') : null;
-        }
-        
-        if (section) {
-          // Seleziona tutte le istituzioni formative
-          const schoolEls = section.querySelectorAll('li.artdeco-list__item, div.pvs-entity');
-          
-          // Estrai informazioni per ciascuna scuola (limita a 3 per prestazioni)
-          Array.from(schoolEls).slice(0, 3).forEach(schEl => {
-            const schoolName = select(schEl.querySelector('h3.pv-entity__school-name, span.mr1.t-bold, span.t-bold.hoverable-link-text'));
-            const degree = select(schEl.querySelector('p.pv-entity__secondary-title, span.pv-entity__comma-item, span.t-14.t-normal'));
-            const dates = select(schEl.querySelector('p.pv-entity__dates span:not(:first-child), .pv-entity__date-range span:not(:first-child)'));
-            const fieldOfStudy = select(schEl.querySelector('.pv-entity__fos span:not(:first-child), span.text-body-small:not(:first-child)'));
-            const description = select(schEl.querySelector('div.pv-entity__description, div.inline-show-more-text'));
-            const schoolUrl = schEl.querySelector('a[href*="/school/"]')?.href || '';
-            
-            // Aggiungi solo se il nome della scuola non è vuoto
-            if (schoolName) {
-              schools.push({
-                schoolName,
-                degree,
-                fieldOfStudy,
-                dates,
-                description,
-                schoolUrl
-              });
-            }
-          });
-        }
-        return schools;
-      });
-      
-      // Optionally extract contact info via overlay
-      let contact = { email: '', phone: '', website: '' };
-      try {
-        const contactUrl = `${profileUrl}/overlay/contact-info/`;
-        await page.goto(contactUrl, { waitUntil: 'domcontentloaded', timeout: navTimeout });
-        await page.waitForTimeout(2000);
-        contact = await page.evaluate(() => {
-          const emailEl = document.querySelector('section.ci-email a, a[href^="mailto:"]');
-          const phoneEl = document.querySelector('section.ci-phone span.t-14');
-          const siteEl = document.querySelector('section.ci-websites a[href^="http"]:not([href*="linkedin.com"])');
-          return {
-            email: emailEl?.innerText.trim() || '',
-            phone: phoneEl?.innerText.trim() || '',
-            website: siteEl?.href || ''
-          };
-        });
-      } catch (e) {
-        // ignore if contact overlay not accessible
-      }
-      // restore main profile page
-      await page.goto(profileUrl, { waitUntil: 'domcontentloaded', timeout: navTimeout });
-      const finalProfile = { 
-        ...enhancedProfileData, 
-        jobs: jobsCollection, 
-        schools: educationCollection,
-        ...contact 
-      };
-      // build prompt with all extracted fields
-      const parts = [`${template}`, 'Profilo:'];
-      for (const [key, value] of Object.entries(finalProfile)) {
-        const label = key.charAt(0).toUpperCase() + key.slice(1);
-        if (Array.isArray(value)) {
-          parts.push(`${label}: ${value.join(', ')}`);
-        } else {
-          parts.push(`${label}: ${value}`);
-        }
-      }
-      const systemMessage = `Genera un messaggio di vendita LinkedIn personalizzato. Usa le informazioni specifiche del profilo per personalizzare il template di messaggio fornito. Indirizza il messaggio a ${finalProfile.name || "questa persona"} e personalizzalo in base alle sue esperienze, competenze e background professionale. Il messaggio deve essere caldo, professionale e diretto, con un'apertura che dimostri interesse genuino nel profilo della persona.`;
-      const userPrompt = parts.join('\n');
-      
-      const response = await openai.chat.completions.create({ 
-        model: 'gpt-4.1-mini', 
-        messages: [
-          { role: 'system', content: systemMessage },
-          { role: 'user', content: userPrompt }
-        ],
-        temperature: 0.7
-      });
-      
-      const message = response.choices[0].message.content;
-      results.push({ profileUrl, profileData: finalProfile, message });
-    } else {
-      // Batch preview: extract full info for top 5 profiles
-      const searchUrl = `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(criteria)}`;
-      await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: navTimeout });
-      await page.waitForFunction(
-        () => document.querySelectorAll('a[href*="/in/"]').length > 0,
-        { timeout: navTimeout }
-      );
-      // Collect unique profile URLs (limit 5)
-      const profileUrls = await page.evaluate(() => {
-        const anchors = Array.from(document.querySelectorAll('a[href*="/in/"]'));
-        const seen = new Set();
-        const out = [];
-        for (const a of anchors) {
-          const url = a.href.split('?')[0];
-          if (!seen.has(url)) {
-            seen.add(url);
-            out.push(url);
-          }
-          if (out.length >= 5) break;
-        }
-        return out;
-      });
-      // Visit each profile to extract detailed data and generate message
-      for (const url of profileUrls) {
+    // Funzione per estrarre dati profilo in modo più efficiente
+    const extractProfileData = async (page, maxRetries = 2) => {
+      for (let attempt = 0; attempt < maxRetries; attempt++) {
         try {
-          // Vai al profilo e attendi il caricamento completo
-          await page.goto(url, { waitUntil: 'networkidle2', timeout: navTimeout });
-          await page.waitForSelector('h1', { timeout: navTimeout });
+          await page.waitForSelector('h1', { timeout: 15000 }); // Timeout ridotto
           
-          // Scorri la pagina per caricare tutti i contenuti
-          await autoScroll(page);
-          
-          // Estrai dati profilo base
           const profileData = await page.evaluate(() => {
             const selectText = (selectors) => {
               for (const sel of selectors) {
@@ -414,15 +135,13 @@ export default async function handler(req, res) {
             
             const selectMultiple = (selector) => {
               const elements = document.querySelectorAll(selector);
-              return Array.from(elements).map(el => el.innerText.trim()).filter(Boolean);
+              return Array.from(elements).slice(0, 5).map(el => el.innerText.trim()).filter(Boolean);
             };
             
-            // Estrai informazioni di base
             const name = selectText(['h1.text-heading-xlarge', 'h1.inline.t-24', 'h1']);
             const headline = selectText(['div.text-body-medium', 'h2', 'span.text-body-medium.break-words']);
             const location = selectText(['span.text-body-small.inline.t-black--light', 'span.t-16.t-normal']);
             
-            // Estrai riepilogo profilo più completo
             const profileSummary = selectText([
               'section.pv-about-section .pv-about__summary-text',
               'section.pv-about-section p',
@@ -430,23 +149,9 @@ export default async function handler(req, res) {
               'section[id*="about"]'
             ]);
             
-            // Estrai tutte le competenze
-            const skills = Array.from(
-              document.querySelectorAll(
-                'span.pv-skill-category-entity__name-text, span.pv-skill-entity__skill-name-text, li.skill-entity'
-              )
-            ).map(el => el.innerText.trim()).filter(Boolean);
+            const skills = selectMultiple('span.pv-skill-category-entity__name-text, span.pv-skill-entity__skill-name-text, li.skill-entity');
             
-            // Estrai endorsements e raccomandazioni
-            const endorsements = document.querySelector('div.pv-skills-section__endorsement-count') 
-              ? document.querySelector('div.pv-skills-section__endorsement-count').innerText 
-              : '';
-            
-            // Numero di connessioni
-            const connectionsText = selectText(['.pv-top-card--list .t-black--light', 'span.t-bold:contains("connessioni")']);
-            const connections = connectionsText.match(/\d+/) ? connectionsText.match(/\d+/)[0] : '';
-            
-            // Estrai jobTitle e companyName dall'headline
+            // Deriva jobTitle e companyName dall'headline
             let jobTitle = '';
             let companyName = '';
             if (/\bat\b/i.test(headline)) {
@@ -459,15 +164,6 @@ export default async function handler(req, res) {
               companyName = (parts[1] || '').trim();
             }
             
-            // Estrai lingue conosciute
-            const languages = selectMultiple('li.languages__list-item h3, section[id*="languages"] li span.t-bold');
-            
-            // Estrai interessi
-            const interests = selectMultiple('section[id*="interest"] li span.t-bold, .pv-interests-section h3');
-            
-            // Estrai certificazioni
-            const certifications = selectMultiple('section[id*="certifications"] li .t-bold, section[id*="certifications"] .t-bold span');
-            
             return { 
               name, 
               headline, 
@@ -475,212 +171,225 @@ export default async function handler(req, res) {
               profileSummary, 
               skills, 
               jobTitle, 
-              companyName,
-              connections,
-              endorsements,
-              languages,
-              interests,
-              certifications
+              companyName
             };
           });
-          // Extract first experience/job details
-          const jobInfo = await page.evaluate(() => {
-            const select = el => el ? el.innerText.trim() : '';
-            let jobDateRange = '', jobCompanyUrl = '', jobDescription = '', jobDuration = '', jobLocation = '';
-            let section = document.querySelector('section[id*="experience"]') || document.querySelector('section.experience-section');
-            if (!section) {
-              const hdr = Array.from(document.querySelectorAll('h2')).find(h => /esperienza|experience/i.test(h.innerText));
-              section = hdr ? hdr.closest('section') : null;
-            }
-            if (section) {
-              const jobEl = section.querySelector('li.artdeco-list__item, div.pvs-entity');
-              if (jobEl) {
-                jobCompanyUrl = jobEl.querySelector('a[href*="/company/"]')?.href || '';
-                const dateEls = Array.from(jobEl.querySelectorAll('span.t-14.t-normal.t-black--light, span.t-12.t-normal.t-black--light'));
-                for (const el of dateEls) {
-                  const txt = select(el);
-                  if (!jobDateRange && /\d{4}/.test(txt)) jobDateRange = txt;
-                  else if (!jobDuration && /\d+\s+(anno|year|mese|month)/i.test(txt)) jobDuration = txt;
-                  else if (!jobLocation && !/\d/.test(txt)) jobLocation = txt;
-                }
-                jobDescription = select(jobEl.querySelector('div.pv-entity__description, div.inline-show-more-text'));
-              }
-            }
-            return { jobDateRange, jobCompanyUrl, jobDescription, jobDuration, jobLocation };
-          });
-          // Estrai tutte le esperienze lavorative in modo dettagliato
-          const jobsCollection = await page.evaluate(() => {
-            const select = el => el ? el.innerText.trim() : '';
-            const jobs = [];
-            
-            // Cerca la sezione delle esperienze
-            let section = document.querySelector('section[id*="experience"]') || document.querySelector('section.experience-section');
-            if (!section) {
-              const hdr = Array.from(document.querySelectorAll('h2')).find(h => /esperienza|experience/i.test(h.innerText));
-              section = hdr ? hdr.closest('section') : null;
-            }
-            
-            if (section) {
-              // Seleziona tutte le esperienze lavorative
-              const jobEls = section.querySelectorAll('li.artdeco-list__item, div.pvs-entity, .pv-entity__position-group');
-              
-              // Estrai informazioni per ciascuna esperienza (limita a 3 per prestazioni)
-              Array.from(jobEls).slice(0, 3).forEach(jobEl => {
-                let title = select(jobEl.querySelector('.pv-entity__summary-info h3, .t-bold span, span.mr1.t-bold'));
-                let company = select(jobEl.querySelector('.pv-entity__secondary-title, span.t-14.t-normal, .t-black--light span:not(.visually-hidden)'));
-                
-                // Estrai URL azienda
-                const companyUrl = jobEl.querySelector('a[href*="/company/"]')?.href || '';
-                
-                // Estrai date e durata
-                let dateRange = '';
-                let duration = '';
-                let location = '';
-                
-                const dateEls = Array.from(jobEl.querySelectorAll('span.t-14.t-normal.t-black--light, span.t-12.t-normal.t-black--light, .pv-entity__date-range span:not(:first-child)'));
-                for (const el of dateEls) {
-                  const txt = select(el);
-                  if (!dateRange && /\d{4}/.test(txt)) dateRange = txt;
-                  else if (!duration && /\d+\s+(anno|year|mese|month)/i.test(txt)) duration = txt;
-                  else if (!location && !/\d/.test(txt) && txt.length > 1) location = txt;
-                }
-                
-                // Descrizione del ruolo
-                const description = select(jobEl.querySelector('div.pv-entity__description, div.inline-show-more-text, .pvs-list__outer-container .pvs-list'));
-                
-                // Aggiungi solo se il titolo o l'azienda non sono vuoti
-                if (title || company) {
-                  jobs.push({
-                    title,
-                    company,
-                    companyUrl,
-                    dateRange,
-                    duration,
-                    location,
-                    description
-                  });
-                }
-              });
-            }
-            return jobs;
-          });
           
-          // Aggiungi la collezione di jobs al jobInfo
-          const enhancedJobInfo = { ...jobInfo, jobs: jobsCollection };
-          
-          // Extract first education/school details
-          const schoolInfo = await page.evaluate(() => {
-            const select = el => el ? el.innerText.trim() : '';
-            let schoolName = '', schoolDegree = '', schoolDescription = '', schoolUrl = '';
-            let section = document.querySelector('section[id*="education"]') || document.querySelector('section.education-section');
-            if (!section) {
-              const hdr = Array.from(document.querySelectorAll('h2')).find(h => /formazione|education/i.test(h.innerText));
-              section = hdr ? hdr.closest('section') : null;
-            }
-            if (section) {
-              const schEl = section.querySelector('li.artdeco-list__item, div.pvs-entity');
-              if (schEl) {
-                schoolName = select(schEl.querySelector('h3.pv-entity__school-name, span.mr1.t-bold, span.t-bold.hoverable-link-text'));
-                schoolDegree = select(schEl.querySelector('p.pv-entity__secondary-title, span.pv-entity__comma-item, span.t-14.t-normal'));
-                schoolDescription = select(schEl.querySelector('div.pv-entity__description, div.inline-show-more-text'));
-                schoolUrl = schEl.querySelector('a[href*="/school/"]')?.href || '';
-              }
-            }
-            return { schoolName, schoolDegree, schoolDescription, schoolUrl };
-          });
-
-          // Estrai tutte le esperienze formative in modo dettagliato
-          const educationCollection = await page.evaluate(() => {
-            const select = el => el ? el.innerText.trim() : '';
-            const schools = [];
-            
-            // Cerca la sezione della formazione
-            let section = document.querySelector('section[id*="education"]') || document.querySelector('section.education-section');
-            if (!section) {
-              const hdr = Array.from(document.querySelectorAll('h2')).find(h => /formazione|education/i.test(h.innerText));
-              section = hdr ? hdr.closest('section') : null;
-            }
-            
-            if (section) {
-              // Seleziona tutte le istituzioni formative
-              const schoolEls = section.querySelectorAll('li.artdeco-list__item, div.pvs-entity');
-              
-              // Estrai informazioni per ciascuna scuola (limita a 3 per prestazioni)
-              Array.from(schoolEls).slice(0, 3).forEach(schEl => {
-                const schoolName = select(schEl.querySelector('h3.pv-entity__school-name, span.mr1.t-bold, span.t-bold.hoverable-link-text'));
-                const degree = select(schEl.querySelector('p.pv-entity__secondary-title, span.pv-entity__comma-item, span.t-14.t-normal'));
-                const dates = select(schEl.querySelector('p.pv-entity__dates span:not(:first-child), .pv-entity__date-range span:not(:first-child)'));
-                const fieldOfStudy = select(schEl.querySelector('.pv-entity__fos span:not(:first-child), span.text-body-small:not(:first-child)'));
-                const description = select(schEl.querySelector('div.pv-entity__description, div.inline-show-more-text'));
-                const schoolUrl = schEl.querySelector('a[href*="/school/"]')?.href || '';
-                
-                // Aggiungi solo se il nome della scuola non è vuoto
-                if (schoolName) {
-                  schools.push({
-                    schoolName,
-                    degree,
-                    fieldOfStudy,
-                    dates,
-                    description,
-                    schoolUrl
-                  });
-                }
-              });
-            }
-            return schools;
-          });
-          
-          // Aggiungi la collezione di scuole al schoolInfo
-          const enhancedSchoolInfo = { ...schoolInfo, schools: educationCollection };
-          
-          // Attempt contact overlay extraction
-          let contact = { email: '', phone: '', website: '' };
-          try {
-            await page.goto(`${url}/overlay/contact-info/`, { waitUntil: 'domcontentloaded', timeout: navTimeout });
+          return profileData;
+        } catch (error) {
+          console.warn(`Attempt ${attempt + 1} failed for profile data extraction:`, error.message);
+          if (attempt < maxRetries - 1) {
             await page.waitForTimeout(2000);
-            contact = await page.evaluate(() => {
-              const emailEl = document.querySelector('section.ci-email a, a[href^="mailto:"]');
-              const phoneEl = document.querySelector('section.ci-phone span.t-14');
-              const siteEl = document.querySelector('section.ci-websites a[href^="http"]:not([href*="linkedin.com"])');
-              return {
-                email: emailEl?.innerText.trim() || '',
-                phone: phoneEl?.innerText.trim() || '',
-                website: siteEl?.href || ''
-              };
-            });
-          } catch {/* ignore overlay errors */}
-          await page.goto(url, { waitUntil: 'domcontentloaded', timeout: navTimeout });
-          const finalProfile = { ...profileData, ...enhancedJobInfo, ...enhancedSchoolInfo, ...contact };
-          const partsArr = [`${template}`, 'Profilo:'];
-          for (const [key, value] of Object.entries(finalProfile)) {
-            const label = key.charAt(0).toUpperCase() + key.slice(1);
-            if (Array.isArray(value)) {
-              partsArr.push(`${label}: ${value.join(', ')}`);
-            } else {
-              partsArr.push(`${label}: ${value}`);
-            }
           }
-          const systemMessageBatch = `Genera un messaggio di vendita LinkedIn personalizzato. Usa le informazioni specifiche del profilo per personalizzare il template di messaggio fornito. Indirizza il messaggio a ${finalProfile.name || "questa persona"} e personalizzalo in base alle sue esperienze, competenze e background professionale. Il messaggio deve essere caldo, professionale e diretto, con un'apertura che dimostri interesse genuino nel profilo della persona.`;
-          const userPromptBatch = partsArr.join('\n');
-          
-          const resp = await openai.chat.completions.create({ 
-            model: 'gpt-4.1-mini', 
-            messages: [
-              { role: 'system', content: systemMessageBatch },
-              { role: 'user', content: userPromptBatch }
-            ],
-            temperature: 0.7
-          });
-          
-          const message = resp.choices[0].message.content;
-          results.push({ profileUrl: url, profileData: finalProfile, message });
-        } catch (err) {
-          console.error(`Error previewing ${url}:`, err.message);
         }
       }
+      return { name: '', headline: '', location: '', profileSummary: '', skills: [], jobTitle: '', companyName: '' };
+    };
+
+    // Funzione per estrarre esperienze lavorative in modo più efficiente
+    const extractJobExperience = async (page) => {
+      try {
+        const jobInfo = await page.evaluate(() => {
+          const select = el => el ? el.innerText.trim() : '';
+          const jobs = [];
+          
+          let section = document.querySelector('section[id*="experience"]') || document.querySelector('section.experience-section');
+          if (!section) {
+            const hdr = Array.from(document.querySelectorAll('h2')).find(h => /esperienza|experience/i.test(h.innerText));
+            section = hdr ? hdr.closest('section') : null;
+          }
+          
+          if (section) {
+            const jobEls = section.querySelectorAll('li.artdeco-list__item, div.pvs-entity, .pv-entity__position-group');
+            
+            // Limita a massimo 2 esperienze per velocità
+            Array.from(jobEls).slice(0, 2).forEach(jobEl => {
+              const title = select(jobEl.querySelector('.pv-entity__summary-info h3, .t-bold span, span.mr1.t-bold'));
+              const company = select(jobEl.querySelector('.pv-entity__secondary-title, span.t-14.t-normal, .t-black--light span:not(.visually-hidden)'));
+              
+              if (title || company) {
+                jobs.push({ title, company });
+              }
+            });
+          }
+          return { jobs };
+        });
+        
+        return jobInfo;
+      } catch (error) {
+        console.warn('Job extraction failed:', error.message);
+        return { jobs: [] };
+      }
+    };
+
+    if (profileUrl) {
+      // Single profile preview con gestione migliorata degli errori
+      try {
+        await page.goto(profileUrl, { 
+          waitUntil: 'domcontentloaded', 
+          timeout: navTimeout 
+        });
+        
+        const profileData = await extractProfileData(page);
+        const jobInfo = await extractJobExperience(page);
+        
+        const finalProfile = { ...profileData, ...jobInfo };
+        
+        // Genera messaggio con OpenAI
+        const parts = [`${template}`, 'Profilo:'];
+        for (const [key, value] of Object.entries(finalProfile)) {
+          const label = key.charAt(0).toUpperCase() + key.slice(1);
+          if (Array.isArray(value)) {
+            parts.push(`${label}: ${value.join(', ')}`);
+          } else {
+            parts.push(`${label}: ${value}`);
+          }
+        }
+        
+        const systemMessage = `Genera un messaggio di vendita LinkedIn personalizzato. Usa le informazioni specifiche del profilo per personalizzare il template di messaggio fornito. Indirizza il messaggio a ${finalProfile.name || "questa persona"} e personalizzalo in base alle sue esperienze, competenze e background professionale. Il messaggio deve essere caldo, professionale e diretto, con un'apertura che dimostri interesse genuino nel profilo della persona.
+
+CONTESTO IMPORTANTE: Max Brigida è il Founder di IT's Week, l'evento di riferimento per il Tech Made in Italy che si terrà l'11-12 Novembre 2025 a Rimini. IT's Week è la settimana dedicata ai Software Italiani, con oltre 2000 partecipanti, 90+ speakers, 80+ espositori e focus su innovazione, tech e software 100% Made in Italy. Include anche gli Ada Lovelace Awards per celebrare le eccellenze tech italiane.
+
+ISTRUZIONI:
+1. Quando appropriato, menziona IT's Week come opportunità di networking e business per professionisti del tech, innovatori e aziende
+2. Se il profilo della persona è correlato al tech, software, innovazione o business, suggerisci IT's Week come evento perfetto per loro
+3. Usa il fatto che IT's Week rappresenta il meglio del tech italiano per creare connessioni con il background della persona
+4. Mantieni il focus sulla personalizzazione basata sul profilo, ma integra naturalmente IT's Week quando rilevante
+
+IMPORTANTE: Termina sempre il messaggio con questa firma:
+
+*Un caro saluto,
+
+Max Brigida
+Made in Italy Tech Evangelist
+Founder IT's Week & Software Italiani
+"L'Italia ha tutto per diventare la Silicon Valley Europea.
+IT's Week è qui per dimostrarlo."*`;
+        const userPrompt = parts.join('\n');
+        
+        const response = await openai.chat.completions.create({ 
+          model: 'gpt-4o-mini', 
+          messages: [
+            { role: 'system', content: systemMessage },
+            { role: 'user', content: userPrompt }
+          ],
+          temperature: 0.7
+        });
+        
+        const message = response.choices[0].message.content;
+        results.push({ profileUrl, profileData: finalProfile, message });
+        
+      } catch (error) {
+        console.error(`Error with profile ${profileUrl}:`, error.message);
+        results.push({ 
+          profileUrl, 
+          profileData: { name: 'Errore nel caricamento', headline: '', location: '', profileSummary: '', skills: [], jobTitle: '', companyName: '' }, 
+          message: 'Impossibile generare il messaggio per questo profilo.',
+          error: error.message 
+        });
+      }
+    } else {
+      // Batch preview ottimizzato
+      try {
+        const searchUrl = `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(criteria)}`;
+        await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: navTimeout });
+        
+        await page.waitForFunction(
+          () => document.querySelectorAll('a[href*="/in/"]').length > 0,
+          { timeout: 15000 }
+        );
+        
+        // Raccogli URL profili (limitato a 3 per velocità)
+        const profileUrls = await page.evaluate(() => {
+          const anchors = Array.from(document.querySelectorAll('a[href*="/in/"]'));
+          const seen = new Set();
+          const out = [];
+          for (const a of anchors) {
+            const url = a.href.split('?')[0];
+            if (!seen.has(url)) {
+              seen.add(url);
+              out.push(url);
+            }
+            if (out.length >= 3) break; // Ridotto da 5 a 3
+          }
+          return out;
+        });
+        
+        // Visita ogni profilo con timeout ridotti
+        for (const url of profileUrls) {
+          try {
+            await page.goto(url, { 
+              waitUntil: 'domcontentloaded', 
+              timeout: 20000 // Timeout ridotto per batch
+            });
+            
+            const profileData = await extractProfileData(page, 1); // Solo 1 tentativo per batch
+            const jobInfo = await extractJobExperience(page);
+            
+            const finalProfile = { ...profileData, ...jobInfo };
+            
+            const partsArr = [`${template}`, 'Profilo:'];
+            for (const [key, value] of Object.entries(finalProfile)) {
+              const label = key.charAt(0).toUpperCase() + key.slice(1);
+              if (Array.isArray(value)) {
+                partsArr.push(`${label}: ${value.join(', ')}`);
+              } else {
+                partsArr.push(`${label}: ${value}`);
+              }
+            }
+            
+            const systemMessageBatch = `Genera un messaggio di vendita LinkedIn personalizzato. Usa le informazioni specifiche del profilo per personalizzare il template di messaggio fornito. Indirizza il messaggio a ${finalProfile.name || "questa persona"} e personalizzalo in base alle sue esperienze, competenze e background professionale. Il messaggio deve essere caldo, professionale e diretto, con un'apertura che dimostri interesse genuino nel profilo della persona.
+
+CONTESTO IMPORTANTE: Max Brigida è il Founder di IT's Week, l'evento di riferimento per il Tech Made in Italy che si terrà l'11-12 Novembre 2025 a Rimini. IT's Week è la settimana dedicata ai Software Italiani, con oltre 2000 partecipanti, 90+ speakers, 80+ espositori e focus su innovazione, tech e software 100% Made in Italy. Include anche gli Ada Lovelace Awards per celebrare le eccellenze tech italiane.
+
+ISTRUZIONI:
+1. Quando appropriato, menziona IT's Week come opportunità di networking e business per professionisti del tech, innovatori e aziende
+2. Se il profilo della persona è correlato al tech, software, innovazione o business, suggerisci IT's Week come evento perfetto per loro
+3. Usa il fatto che IT's Week rappresenta il meglio del tech italiano per creare connessioni con il background della persona
+4. Mantieni il focus sulla personalizzazione basata sul profilo, ma integra naturalmente IT's Week quando rilevante
+
+IMPORTANTE: Termina sempre il messaggio con questa firma:
+
+*Un caro saluto,
+
+Max Brigida
+Made in Italy Tech Evangelist
+Founder IT's Week & Software Italiani
+"L'Italia ha tutto per diventare la Silicon Valley Europea.
+IT's Week è qui per dimostrarlo."*`;
+            const userPromptBatch = partsArr.join('\n');
+            
+            const resp = await openai.chat.completions.create({ 
+              model: 'gpt-4o-mini', 
+              messages: [
+                { role: 'system', content: systemMessageBatch },
+                { role: 'user', content: userPromptBatch }
+              ],
+              temperature: 0.7
+            });
+            
+            const message = resp.choices[0].message.content;
+            results.push({ profileUrl: url, profileData: finalProfile, message });
+            
+          } catch (err) {
+            console.error(`Error previewing ${url}:`, err.message);
+            results.push({
+              profileUrl: url,
+              profileData: { name: 'Errore nel caricamento', headline: '', location: '', profileSummary: '', skills: [], jobTitle: '', companyName: '' },
+              message: 'Impossibile generare il messaggio per questo profilo.',
+              error: err.message
+            });
+          }
+        }
+      } catch (error) {
+        console.error('Batch processing error:', error.message);
+        return res.status(500).json({ success: false, error: `Errore nella ricerca batch: ${error.message}` });
+      }
     }
+    
     await browser.close();
     return res.status(200).json({ success: true, results });
+    
   } catch (error) {
     if (browser) await browser.close();
     console.error(error);

@@ -3,7 +3,9 @@ import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import chrome from 'chrome-aws-lambda';
 import OpenAI from 'openai';
 
-puppeteer.use(StealthPlugin());
+const stealth = StealthPlugin();
+stealth.enabledEvasions.delete('chrome.app'); // Disabilita l'evasione problematica
+puppeteer.use(stealth);
 
 export const config = {
   maxDuration: 60,

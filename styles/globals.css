@@ -37,11 +37,14 @@
 }
 
 @layer base {
-  * {
+  /* Rimuoviamo la regola globale per border-border per evitare l'errore di build */
+  /* * {
     @apply border-border;
-  }
+  } */
   body {
-    @apply bg-background text-foreground;
+    /* @apply bg-background text-foreground; */ /* Rimosso @apply */
+    background-color: hsl(var(--background)); /* Applicato direttamente */
+    color: hsl(var(--foreground));           /* Applicato direttamente */
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;

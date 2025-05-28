@@ -20,8 +20,9 @@ L'accesso a LinkedIn avviene tramite l'import dei cookie in JSON dal form.
 
 ## Deploy su Vercel
 1. Collega il repository a Vercel
-2. Imposta la variabile di ambiente `OPENAI_API_KEY` nelle impostazioni del progetto
-3. Esegui il deploy
+2. Assicurati che il file `vercel.json` sia presente nella root (già incluso)
+3. Imposta la variabile di ambiente `OPENAI_API_KEY` nelle impostazioni del progetto
+4. Esegui il deploy
 
 ## Utilizzo
 1. Nella pagina principale, inserisci:

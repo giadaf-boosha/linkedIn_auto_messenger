@@ -4,6 +4,10 @@ import chrome from 'chrome-aws-lambda';
 
 puppeteer.use(StealthPlugin());
 
+export const config = {
+  maxDuration: 60,
+};
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST');

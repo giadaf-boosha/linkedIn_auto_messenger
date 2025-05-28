@@ -22,7 +22,8 @@ import {
 } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
-import { Toaster, toast } from "@/components/ui/sonner";
+import { Toaster } from "@/components/ui/sonner";
+import { toast } from "sonner";
 import { Separator } from "@/components/ui/separator";
 import { ExternalLink, Send, RotateCcw, PlusCircle, Loader2, Trash2, Edit3, CheckCircle2, XCircle, Info } from 'lucide-react';
 

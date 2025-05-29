@@ -6,7 +6,6 @@ import OpenAI from 'openai';
 // Specifica un set ridotto di evasioni
 const stealth = StealthPlugin({
   enabledEvasions: new Set([
-    'contentWindow',
     'iframe.contentWindow',
     'media.codecs',
     'navigator.hardwareConcurrency',

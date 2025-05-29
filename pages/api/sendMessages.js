@@ -59,7 +59,17 @@ export default async function handler(req, res) {
           executablePath: await chrome.executablePath,
           headless: chrome.headless
         };
-    
+    console.log("NODE_ENV:", process.env.NODE_ENV);
+    console.log("chrome.args:", chrome.args);
+    console.log("chrome.defaultViewport:", chrome.defaultViewport);
+    console.log("await chrome.executablePath:", await chrome.executablePath);
+    console.log("chrome.headless:", chrome.headless);
+
+    if (!isDev && !(await chrome.executablePath)) {
+      console.error('chrome.executablePath is not available on Vercel!');
+      return res.status(500).json({ success: false, error: 'Chromium not available on Vercel' });
+    }
+
     browser = await puppeteer.launch(launchOptions);
     const page = await browser.newPage();
     

@@ -3,10 +3,23 @@ import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import chrome from 'chrome-aws-lambda';
 import OpenAI from 'openai';
 
-const stealth = StealthPlugin();
-stealth.enabledEvasions.delete('chrome.app'); // Disabilita l'evasione problematica
-stealth.enabledEvasions.delete('chrome.csi'); // Disabilita l'evasione problematica
-stealth.enabledEvasions.delete('chrome.loadTimes'); // Disabilita l'evasione problematica
+// Specifica un set ridotto di evasioni
+const stealth = StealthPlugin({
+  enabledEvasions: new Set([
+    'contentWindow',
+    'iframe.contentWindow',
+    'media.codecs',
+    'navigator.hardwareConcurrency',
+    'navigator.languages',
+    'navigator.permissions',
+    'navigator.plugins',
+    'navigator.webdriver',
+    'sourceurl',
+    'user-agent-override',
+    'webgl.vendor',
+    'window.outerdimensions'
+  ])
+});
 puppeteer.use(stealth);
 
 export const config = {

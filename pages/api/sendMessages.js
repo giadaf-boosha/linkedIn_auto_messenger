@@ -2,10 +2,24 @@ import puppeteer from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import chrome from 'chrome-aws-lambda';
 
-const stealth = StealthPlugin();
-stealth.enabledEvasions.delete('chrome.csi');
-stealth.enabledEvasions.delete('chrome.loadTimes');
-pupeteer.use(stealth);
+// Specifica un set ridotto di evasioni
+const stealth = StealthPlugin({
+  enabledEvasions: new Set([
+    'contentWindow',
+    'iframe.contentWindow',
+    'media.codecs',
+    'navigator.hardwareConcurrency',
+    'navigator.languages',
+    'navigator.permissions',
+    'navigator.plugins',
+    'navigator.webdriver',
+    'sourceurl',
+    'user-agent-override',
+    'webgl.vendor',
+    'window.outerdimensions'
+  ])
+});
+puppeteer.use(stealth);
 
 export const config = {
   maxDuration: 60,
@@ -332,17 +346,18 @@ export default async function handler(req, res) {
         try {
           await page.screenshot({ path: `debug-error-${Date.now()}.png` });
         } catch (e) {
-          console.log('Failed to take error screenshot');
+          console.log('Screenshot failed');
         }
       }
     }
     
-    await browser.close();
-    
     return res.status(200).json({ success: true, results });
-  } catch (error) {
-    if (browser) await browser.close();
-    console.error(error);
-    return res.status(500).json({ success: false, error: error.message });
+  } catch (err) {
+    console.error('Error processing request:', err.message);
+    return res.status(500).json({ success: false, error: 'Internal Server Error' });
+  } finally {
+    if (browser) {
+      await browser.close();
+    }
   }
 }

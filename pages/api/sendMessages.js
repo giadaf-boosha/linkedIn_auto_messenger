@@ -1,25 +1,25 @@
 import puppeteer from 'puppeteer-extra';
-// import StealthPlugin from 'puppeteer-extra-plugin-stealth';
+import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import chromium from '@sparticuz/chromium';
 
-// // Specifica un set ridotto di evasioni
-// const stealth = StealthPlugin({
-//   enabledEvasions: new Set([
-//     'contentWindow',
-//     'iframe.contentWindow',
-//     'media.codecs',
-//     'navigator.hardwareConcurrency',
-//     'navigator.languages',
-//     'navigator.permissions',
-//     'navigator.plugins',
-//     'navigator.webdriver',
-//     'sourceurl',
-//     'user-agent-override',
-//     'webgl.vendor',
-//     'window.outerdimensions'
-//   ])
-// });
-// puppeteer.use(stealth);
+// Specifica un set ridotto di evasioni
+const stealth = StealthPlugin({
+  enabledEvasions: new Set([
+    'contentWindow',
+    'iframe.contentWindow',
+    'media.codecs',
+    'navigator.hardwareConcurrency',
+    'navigator.languages',
+    'navigator.permissions',
+    'navigator.plugins',
+    'navigator.webdriver',
+    'sourceurl',
+    'user-agent-override',
+    'webgl.vendor',
+    'window.outerdimensions'
+  ])
+});
+puppeteer.use(stealth);
 
 export const config = {
   maxDuration: 60,
@@ -59,14 +59,9 @@ export default async function handler(req, res) {
           executablePath: await chromium.executablePath(),
           headless: chromium.headless
         };
-    console.log("NODE_ENV:", process.env.NODE_ENV);
-    console.log("chromium.args:", chromium.args);
-    console.log("chromium.defaultViewport:", chromium.defaultViewport);
-    console.log("await chromium.executablePath:", await chromium.executablePath());
-    console.log("chromium.headless:", chromium.headless);
 
     if (!isDev && !(await chromium.executablePath())) {
-      console.error('chromium.executablePath is not available on Vercel!');
+      console.error('chromium.executablePath is not available on Vercel! It should not happen with @sparticuz/chromium');
       return res.status(500).json({ success: false, error: 'Chromium not available on Vercel' });
     }
 

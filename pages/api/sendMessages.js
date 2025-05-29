@@ -4,6 +4,7 @@ import chrome from 'chrome-aws-lambda';
 
 const stealth = StealthPlugin();
 stealth.enabledEvasions.delete('chrome.csi');
+stealth.enabledEvasions.delete('chrome.loadTimes');
 pupeteer.use(stealth);
 
 export const config = {

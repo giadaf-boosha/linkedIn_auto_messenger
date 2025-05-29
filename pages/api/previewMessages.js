@@ -6,6 +6,7 @@ import OpenAI from 'openai';
 const stealth = StealthPlugin();
 stealth.enabledEvasions.delete('chrome.app'); // Disabilita l'evasione problematica
 stealth.enabledEvasions.delete('chrome.csi'); // Disabilita l'evasione problematica
+stealth.enabledEvasions.delete('chrome.loadTimes'); // Disabilita l'evasione problematica
 puppeteer.use(stealth);
 
 export const config = {

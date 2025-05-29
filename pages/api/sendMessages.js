@@ -2,7 +2,9 @@ import puppeteer from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import chrome from 'chrome-aws-lambda';
 
-puppeteer.use(StealthPlugin());
+const stealth = StealthPlugin();
+stealth.enabledEvasions.delete('chrome.csi');
+pupeteer.use(stealth);
 
 export const config = {
   maxDuration: 60,

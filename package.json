@@ -21,7 +21,7 @@
     "openai": "^4.103.0",
     "puppeteer-core": "^10.4.0",
     "puppeteer-extra": "^3.3.6",
-    "puppeteer-extra-plugin-stealth": "2.9.0",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
     "react": "latest",
     "react-dom": "latest",
     "sonner": "^2.0.3",

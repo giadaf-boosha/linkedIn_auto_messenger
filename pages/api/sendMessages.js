@@ -1,6 +1,6 @@
 import puppeteer from 'puppeteer-extra';
 // import StealthPlugin from 'puppeteer-extra-plugin-stealth';
-import chrome from 'chrome-aws-lambda';
+import chromium from '@sparticuz/chromium';
 
 // // Specifica un set ridotto di evasioni
 // const stealth = StealthPlugin({
@@ -54,19 +54,19 @@ export default async function handler(req, res) {
           ]
         }
       : {
-          args: chrome.args,
-          defaultViewport: chrome.defaultViewport,
-          executablePath: await chrome.executablePath,
-          headless: chrome.headless
+          args: chromium.args,
+          defaultViewport: chromium.defaultViewport,
+          executablePath: await chromium.executablePath(),
+          headless: chromium.headless
         };
     console.log("NODE_ENV:", process.env.NODE_ENV);
-    console.log("chrome.args:", chrome.args);
-    console.log("chrome.defaultViewport:", chrome.defaultViewport);
-    console.log("await chrome.executablePath:", await chrome.executablePath);
-    console.log("chrome.headless:", chrome.headless);
+    console.log("chromium.args:", chromium.args);
+    console.log("chromium.defaultViewport:", chromium.defaultViewport);
+    console.log("await chromium.executablePath:", await chromium.executablePath());
+    console.log("chromium.headless:", chromium.headless);
 
-    if (!isDev && !(await chrome.executablePath)) {
-      console.error('chrome.executablePath is not available on Vercel!');
+    if (!isDev && !(await chromium.executablePath())) {
+      console.error('chromium.executablePath is not available on Vercel!');
       return res.status(500).json({ success: false, error: 'Chromium not available on Vercel' });
     }
 

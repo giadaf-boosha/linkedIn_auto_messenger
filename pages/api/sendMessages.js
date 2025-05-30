@@ -2,8 +2,7 @@ import puppeteer from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import chromium from '@sparticuz/chromium';
 
-// Riabilitiamo StealthPlugin con le sue evasioni di default
-const stealth = StealthPlugin();
+const stealth = StealthPlugin(); // Usiamo la configurazione di default
 pupeteer.use(stealth);
 
 export const config = {
@@ -44,11 +43,6 @@ export default async function handler(req, res) {
           executablePath: await chromium.executablePath(),
           headless: chromium.headless
         };
-
-    if (!isDev && !(await chromium.executablePath())) {
-      console.error('chromium.executablePath is not available on Vercel! It should not happen with @sparticuz/chromium');
-      return res.status(500).json({ success: false, error: 'Chromium not available on Vercel' });
-    }
 
     browser = await puppeteer.launch(launchOptions);
     const page = await browser.newPage();

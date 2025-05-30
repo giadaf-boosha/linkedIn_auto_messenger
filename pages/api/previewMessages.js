@@ -3,8 +3,7 @@ import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import chromium from '@sparticuz/chromium';
 import OpenAI from 'openai';
 
-// Riabilitiamo StealthPlugin con le sue evasioni di default
-const stealth = StealthPlugin();
+const stealth = StealthPlugin(); // Usiamo la configurazione di default
 pupeteer.use(stealth);
 
 export const config = {
@@ -43,14 +42,9 @@ export default async function handler(req, res) {
       : {
           args: chromium.args,
           defaultViewport: chromium.defaultViewport,
-          executablePath: await chromium.executablePath(),
+          executablePath: await chromium.executablePath(), 
           headless: chromium.headless
         };
-
-    if (!isDev && !(await chromium.executablePath())) {
-      console.error('chromium.executablePath is not available on Vercel! It should not happen with @sparticuz/chromium');
-      return res.status(500).json({ success: false, error: 'Chromium not available on Vercel' });
-    }
 
     browser = await puppeteer.launch(launchOptions);
     const page = await browser.newPage();
@@ -322,7 +316,7 @@ IT's Week è qui per dimostrarlo."*`;
               seen.add(url);
               out.push(url);
             }
-            if (out.length >= 1) break; // Ridotto a 1 per test
+            if (out.length >= 3) break; // Ridotto da 5 a 3
           }
           return out;
         });

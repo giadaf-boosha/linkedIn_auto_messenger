@@ -71,17 +71,17 @@ export default function Home() {
           toast.loading('Anteprima generata. Invio messaggi automatico...', { id: 'preview-toast' });
           // Direttamente invio se la conferma non è richiesta
           await handleDirectSend(results);
-        } else {
-          setPreviewResults(results);
-          const initSel = {};
-          const initEdits = {};
-          results.forEach(r => {
-            initSel[r.profileUrl] = true;
-            initEdits[r.profileUrl] = r.message;
-          });
-          setSelected(initSel);
-          setEditedMessages(initEdits);
-          setStep(2);
+      } else {
+        setPreviewResults(results);
+        const initSel = {};
+        const initEdits = {};
+        results.forEach(r => {
+          initSel[r.profileUrl] = true;
+          initEdits[r.profileUrl] = r.message;
+        });
+        setSelected(initSel);
+        setEditedMessages(initEdits);
+        setStep(2);
           toast.success('Anteprima generata con successo!', { id: 'preview-toast' });
         }
       }
@@ -217,7 +217,7 @@ export default function Home() {
         </header>
 
         <main className="w-full max-w-4xl">
-          {step === 1 && (
+      {step === 1 && (
             <Card className="bg-slate-800/70 border-slate-700 shadow-2xl shadow-purple-500/10">
               <CardHeader>
                 <CardTitle className="text-2xl font-semibold text-slate-100">Configura la Tua Campagna</CardTitle>
@@ -230,47 +230,47 @@ export default function Home() {
                     id="cookies"
                     rows={5}
                     className="bg-slate-700/50 border-slate-600 text-slate-200 focus:ring-purple-500 focus:border-purple-500"
-                    value={cookies}
-                    onChange={e => setCookies(e.target.value)}
+                value={cookies}
+                onChange={e => setCookies(e.target.value)}
                     placeholder='Incolla qui i tuoi cookie di LinkedIn (es., [{ "name": "li_at", "value": "...", ... }])'
-                    required
-                  />
-                </div>
+                required
+              />
+            </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="space-y-2">
                     <Label htmlFor="criteria" className="text-slate-300">Criteri di Ricerca (Parole Chiave)</Label>
                     <Input
                       id="criteria"
-                      type="text"
+                type="text"
                       className="bg-slate-700/50 border-slate-600 text-slate-200 focus:ring-purple-500 focus:border-purple-500"
-                      value={criteria}
-                      onChange={e => setCriteria(e.target.value)}
+                value={criteria}
+                onChange={e => setCriteria(e.target.value)}
                       placeholder="es., Software Engineer a Milano"
-                      required
-                    />
-                  </div>
+                required
+              />
+            </div>
                   <div className="space-y-2">
                     <Label htmlFor="template" className="text-slate-300">Modello Messaggio Base</Label>
                     <Textarea
                       id="template"
                       rows={3}
                       className="bg-slate-700/50 border-slate-600 text-slate-200 focus:ring-purple-500 focus:border-purple-500"
-                      value={template}
-                      onChange={e => setTemplate(e.target.value)}
+                value={template}
+                onChange={e => setTemplate(e.target.value)}
                       placeholder="es., Ciao {name}, ho visto il tuo profilo..."
-                      required
-                    />
-                  </div>
+                required
+              />
+            </div>
                 </div>
                 <div className="flex items-center space-x-2 pt-2">
                   <Switch
                     id="requireConfirmation"
-                    checked={requireConfirmation}
+                  checked={requireConfirmation}
                     onCheckedChange={setRequireConfirmation}
                     className="data-[state=checked]:bg-purple-500"
-                  />
+                />
                   <Label htmlFor="requireConfirmation" className="text-slate-300 cursor-pointer">Richiedi conferma prima di inviare i messaggi</Label>
-                </div>
+            </div>
               </CardContent>
               <CardFooter className="flex justify-end">
                 <Button 
@@ -283,9 +283,9 @@ export default function Home() {
                 </Button>
               </CardFooter>
             </Card>
-          )}
+      )}
 
-          {step === 2 && (
+      {step === 2 && (
             <Card className="bg-slate-800/70 border-slate-700 shadow-2xl shadow-pink-500/10">
               <CardHeader>
                 <div className="flex justify-between items-center">
@@ -301,7 +301,7 @@ export default function Home() {
                     <Button variant="outline" onClick={() => setStep(1)} className="text-slate-300 border-slate-600 hover:bg-slate-700 hover:text-slate-100">
                         <Edit3 className="mr-2 h-4 w-4" /> Modifica Configurazione
                     </Button>
-                </div>
+          </div>
               </CardHeader>
               <CardContent>
                 <div className="mb-6 p-4 border border-slate-700 rounded-lg bg-slate-700/30">
@@ -311,15 +311,15 @@ export default function Home() {
                         id="newProfileUrl"
                         type="url"
                         className="flex-grow bg-slate-600/50 border-slate-500 text-slate-200 focus:ring-pink-500 focus:border-pink-500"
-                        value={newProfileUrl}
-                        onChange={e => setNewProfileUrl(e.target.value)}
+                value={newProfileUrl}
+                onChange={e => setNewProfileUrl(e.target.value)}
                         placeholder="https://www.linkedin.com/in/il-tuo-profilo-target/"
-                        />
+              />
                         <Button onClick={handleAddProfile} disabled={processing || !newProfileUrl.trim()} variant="secondary" className="bg-pink-600 hover:bg-pink-700 text-white">
                             {processing && newProfileUrl ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <PlusCircle className="mr-2 h-4 w-4" />} Aggiungi Profilo
                         </Button>
-                    </div>
-                </div>
+            </div>
+          </div>
                 
                 {previewResults.length > 0 ? (
                     <div className="overflow-x-auto">
@@ -403,8 +403,8 @@ export default function Home() {
                     <div className="text-center py-10 text-slate-500">
                         <Info className="mx-auto h-12 w-12 mb-2" />
                         <p>Nessun profilo da visualizzare in anteprima. Genera un\'anteprima o aggiungi l\'URL di un profilo.</p>
-                    </div>
-                )}
+        </div>
+      )}
               </CardContent>
               <CardFooter className="flex flex-col sm:flex-row justify-between items-center gap-4 pt-6">
                 <p className="text-sm text-slate-400">
@@ -427,7 +427,7 @@ export default function Home() {
             </Card>
           )}
 
-          {step === 3 && (
+      {step === 3 && (
             <Card className="bg-slate-800/70 border-slate-700 shadow-2xl shadow-purple-500/20">
               <CardHeader>
                 <CardTitle className="text-2xl font-semibold text-slate-100">Report Campagna</CardTitle>
@@ -475,8 +475,8 @@ export default function Home() {
                     <div className="text-center py-10 text-slate-500">
                         <Info className="mx-auto h-12 w-12 mb-2" />
                         <p>Nessuna attività di invio messaggi da segnalare.</p>
-                    </div>
-                )}
+        </div>
+      )}
               </CardContent>
               <CardFooter className="flex justify-end pt-6">
                 <Button onClick={handleReset} className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white font-semibold">
@@ -493,7 +493,7 @@ export default function Home() {
             <p>Realizzato con passione per un outreach efficiente.</p>
         </footer>
 
-      </div>
+    </div>
     </>
   );
 }

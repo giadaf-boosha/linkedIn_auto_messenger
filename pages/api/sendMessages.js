@@ -5,7 +5,9 @@ import chromium from '@sparticuz/chromium';
 // Specifica un set ridotto di evasioni
 const stealth = StealthPlugin({
   enabledEvasions: new Set([
-    'media.codecs',
+    // 'contentWindow', // Rimosso
+    // 'iframe.contentWindow', // Rimosso
+    // 'media.codecs', // Rimuoviamo anche questa
     'navigator.hardwareConcurrency',
     'navigator.languages',
     'navigator.permissions',

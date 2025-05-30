@@ -20,7 +20,7 @@ const stealth = StealthPlugin({
     'window.outerdimensions'
   ])
 });
-puppeteer.use(stealth);
+// puppeteer.use(stealth); // Disabilitiamo completamente l'uso del plugin Stealth
 
 export const config = {
   maxDuration: 60,

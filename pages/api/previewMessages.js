@@ -3,24 +3,9 @@ import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import chromium from '@sparticuz/chromium';
 import OpenAI from 'openai';
 
-// Specifica un set ridotto di evasioni
-const stealth = StealthPlugin({
-  enabledEvasions: new Set([
-    // 'contentWindow', // Rimosso
-    // 'iframe.contentWindow', // Rimosso
-    // 'media.codecs', // Rimuoviamo anche questa
-    'navigator.hardwareConcurrency',
-    'navigator.languages',
-    'navigator.permissions',
-    'navigator.plugins',
-    'navigator.webdriver',
-    'sourceurl',
-    'user-agent-override',
-    'webgl.vendor',
-    'window.outerdimensions'
-  ])
-});
-// puppeteer.use(stealth); // Disabilitiamo completamente l'uso del plugin Stealth
+// Riabilitiamo StealthPlugin con le sue evasioni di default
+const stealth = StealthPlugin();
+pupeteer.use(stealth);
 
 export const config = {
   maxDuration: 60,

@@ -4,14 +4,17 @@ import chromium from '@sparticuz/chromium';
 import OpenAI from 'openai';
 
 const stealth = StealthPlugin(); // Usiamo la configurazione di default
-pupeteer.use(stealth);
+puppeteer.use(stealth);
 
 export const config = {
   maxDuration: 60,
 };
 
 export default async function handler(req, res) {
+  console.log(`[${new Date().toISOString()}] Received request for /api/previewMessages. Method: ${req.method}, URL: ${req.url}`);
+
   if (req.method !== 'POST') {
+    console.warn(`[${new Date().toISOString()}] Method Not Allowed: ${req.method} for /api/previewMessages. Allowed: POST.`);
     res.setHeader('Allow', 'POST');
     return res.status(405).json({ success: false, error: 'Method Not Allowed' });
   }

@@ -3,10 +3,10 @@ import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import chromium from '@sparticuz/chromium';
 import OpenAI from 'openai';
 
-const stealth = StealthPlugin(); // Usiamo la configurazione di default
-// Rimuovi le evasioni problematiche
-stealth.enabledEvasions.delete('chrome.app');
-stealth.enabledEvasions.delete('chrome.csi');
+const stealth = StealthPlugin();
+// Prova a disabilitare tutte le evasioni conosciute che potrebbero dare problemi o svuotare il set
+stealth.enabledEvasions.clear(); // Rimuove tutte le evasioni abilitate
+
 puppeteer.use(stealth);
 
 export const config = {

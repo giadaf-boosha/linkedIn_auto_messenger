@@ -2,9 +2,10 @@ import puppeteer from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import chromium from '@sparticuz/chromium';
 
-const stealth = StealthPlugin(); // Usiamo la configurazione di default
-stealth.enabledEvasions.delete('chrome.app');
-stealth.enabledEvasions.delete('chrome.csi');
+const stealth = StealthPlugin();
+// Prova a disabilitare tutte le evasioni conosciute che potrebbero dare problemi o svuotare il set
+stealth.enabledEvasions.clear(); // Rimuove tutte le evasioni abilitate
+
 puppeteer.use(stealth);
 
 export const config = {

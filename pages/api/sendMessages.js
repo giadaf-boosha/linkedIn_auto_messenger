@@ -4,6 +4,7 @@ import chromium from '@sparticuz/chromium';
 
 const stealth = StealthPlugin(); // Usiamo la configurazione di default
 stealth.enabledEvasions.delete('chrome.app');
+stealth.enabledEvasions.delete('chrome.csi');
 puppeteer.use(stealth);
 
 export const config = {

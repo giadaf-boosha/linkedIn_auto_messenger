@@ -134,21 +134,22 @@ export default async function handler(req, res) {
         // If no button found with selectors, try searching by text
         if (!messageButton) {
           try {
-            messageButton = await page.evaluateHandle(() => {
+            const jsHandle = await page.evaluateHandle(() => {
               const buttons = Array.from(document.querySelectorAll('button, a'));
               return buttons.find(btn => {
                 const text = btn.textContent?.toLowerCase() || '';
                 return text.includes('message') || text.includes('messaggio');
               });
             });
-            
-            // Verify the handle is valid
-            if (messageButton && !(await messageButton.evaluate(el => el !== null))) {
-              messageButton = null;
+            messageButton = jsHandle.asElement(); // Converti JSHandle in ElementHandle o null
+            if (messageButton) {
+              console.log('Found message button by text content.');
+            } else {
+              console.log('Message button not found by text content.');
             }
           } catch (e) {
             console.log('Text search for message button failed:', e.message);
-            messageButton = null;
+            messageButton = null; // Assicura che sia null in caso di errore
           }
         }
         

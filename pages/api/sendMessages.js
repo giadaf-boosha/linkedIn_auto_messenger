@@ -101,63 +101,137 @@ export default async function handler(req, res) {
         // Verify we're still on LinkedIn
         const currentUrl = page.url();
         if (!currentUrl.includes('linkedin.com')) {
+          console.warn(`Redirected off LinkedIn to ${currentUrl} for profile ${profileUrl}. Taking screenshot.`);
+          await page.screenshot({ path: `debug-redirected-${Date.now()}.png` });
           throw new Error('Reindirizzato fuori da LinkedIn');
+        }
+
+        // Log the beginning of the body's outerHTML for context
+        try {
+          const bodyHTMLStart = await page.evaluate(() => document.body && document.body.outerHTML ? document.body.outerHTML.substring(0, 1000) : 'No body element found');
+          console.log(`Body HTML Start for ${profileUrl}: ${bodyHTMLStart}`);
+        } catch (htmlError) {
+          console.log(`Could not get body HTML start for ${profileUrl}:`, htmlError.message);
         }
         
         // Try multiple selectors for the message button
         const messageButtonSelectors = [
-          'button[data-control-name="message"]',
-          'a[data-control-name="message"]',
-          'button[aria-label*="Message"]',
-          'button[aria-label*="Messaggio"]',
+          'button[data-control-name="message"]', // Specific
+          'a[data-control-name="message"]',       // Specific
+          '.pv-top-card-v2-ctas button[data-control-name="message"]', // Common on profile pages
+          'button[aria-label*="Message"]', // Case-insensitive contains "Message"
+          'button[aria-label*="Messaggio"]', // Italian
           'button[aria-label*="Send message"]',
           'button[aria-label*="Invia messaggio"]',
-          '.pv-s-profile-actions--message',
-          '.message-anywhere-button',
-          '.pv-top-card-v2-ctas button[data-control-name="message"]'
+          '.pv-s-profile-actions--message', // Older selector
+          '.message-anywhere-button',       // Another common class
+          'button.artdeco-button[aria-label*="message" i]', // More general artdeco button with message in aria-label (i for case-insensitive)
+          'a.artdeco-button[aria-label*="message" i]',
+          'button.pv-top-card-v2-ctas__message', // Another specific class from some layouts
+          'a.message-anywhere-button' // Ensure anchor version is also tried
+          // Add other selectors based on future findings
         ];
         
         let messageButton = null;
+        let foundBySelector = null;
         for (const selector of messageButtonSelectors) {
           try {
-            await page.waitForSelector(selector, { timeout: 5000 });
-            messageButton = await page.$(selector);
-            if (messageButton) {
-              console.log(`Found message button with selector: ${selector}`);
-              break;
+            // console.log(`Trying message button selector: ${selector} for profile ${profileUrl}`);
+            // Wait for a short time to see if it appears, visible is important
+            await page.waitForSelector(selector, { timeout: 2000, visible: true });
+            const button = await page.$(selector);
+            if (button) {
+              // Additional check if it's truly visible and interactable
+              const isActuallyVisible = await button.isIntersectingViewport();
+              if(isActuallyVisible){
+                console.log(`Found message button with selector: ${selector} for profile ${profileUrl}`);
+                messageButton = button;
+                foundBySelector = selector;
+                break;
+              } else {
+                // console.log(`Selector ${selector} found but button not intersecting viewport.`);
+              }
             }
           } catch (e) {
+            // console.log(`Message button selector ${selector} failed or not visible: ${e.message}`);
             continue;
           }
         }
         
-        // If no button found with selectors, try searching by text
+        // If no button found with selectors, try searching by text more robustly
         if (!messageButton) {
+          console.log(`Message button not found by specific selectors for ${profileUrl}. Attempting text-based search.`);
           try {
             const jsHandle = await page.evaluateHandle(() => {
-              const buttons = Array.from(document.querySelectorAll('button, a'));
-              return buttons.find(btn => {
-                const text = btn.textContent?.toLowerCase() || '';
-                return text.includes('message') || text.includes('messaggio');
-              });
+              const elements = Array.from(document.querySelectorAll('button, a, div[role="button"]'));
+              // console.log(`[LinkedIn Page Eval] Checking ${elements.length} elements for message button by text.`);
+              let foundBtn = null;
+              const keywords = ['message', 'messaggio', 'send message', 'invia messaggio']; 
+
+              for (let i = 0; i < elements.length; i++) {
+                  const elem = elements[i];
+                  let elemText = '';
+                  let ariaLabel = '';
+
+                  // Prefer innerText for visible text, fallback to textContent
+                  if (elem.innerText) elemText = elem.innerText.trim().toLowerCase();
+                  else if (elem.textContent) elemText = elem.textContent.trim().toLowerCase();
+                  
+                  if (elem.getAttribute('aria-label')) {
+                      ariaLabel = elem.getAttribute('aria-label').trim().toLowerCase();
+                  }
+
+                  for (const keyword of keywords) {
+                      if (elemText.includes(keyword) || ariaLabel.includes(keyword)) {
+                          const rect = elem.getBoundingClientRect();
+                          const style = window.getComputedStyle(elem);
+                          const isVisible = rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none' && !elem.disabled;
+                          
+                          if (isVisible) {
+                              console.log(`[LinkedIn Page Eval] Found potential message button by text: '${keyword}' in element with text/aria: '${elemText}' / '${ariaLabel}'`);
+                              foundBtn = elem;
+                              break; 
+                          }
+                      }
+                  }
+                  if (foundBtn) break; 
+              }
+              return foundBtn;
             });
-            messageButton = jsHandle.asElement(); // Converti JSHandle in ElementHandle o null
-            if (messageButton) {
-              console.log('Found message button by text content.');
+
+            const potentialButton = jsHandle.asElement();
+            if (potentialButton) {
+                // Check if it's truly visible and interactable from Puppeteer's perspective
+                if (await potentialButton.isIntersectingViewport()){
+                    console.log(`Found message button by text content and it is visible for ${profileUrl}.`);
+                    messageButton = potentialButton;
+                    foundBySelector = 'text-based search';
+                } else {
+                    console.log(`Message button found by text content for ${profileUrl}, but not visible/intersecting viewport.`);
+                    await potentialButton.dispose(); // Clean up handle
+                }
             } else {
-              console.log('Message button not found by text content.');
+                console.log(`Message button not found by text content for ${profileUrl}.`);
             }
+            await jsHandle.dispose(); // Always dispose the JSHandle
+
           } catch (e) {
-            console.log('Text search for message button failed:', e.message);
-            messageButton = null; // Assicura che sia null in caso di errore
+            console.log(`Text search for message button failed for ${profileUrl}:`, e.message);
+            messageButton = null; 
           }
         }
         
         if (!messageButton) {
+          console.error(`Pulsante messaggio non trovato per ${profileUrl} dopo tutti i tentativi. Screenshotting...`);
+          try {
+            await page.screenshot({ path: `debug-no-message-button-${Date.now()}-${profileUrl.split('/').pop()}.png` });
+          } catch (screenshotError) {
+            console.log(`Screenshot failed for no-message-button on ${profileUrl}:`, screenshotError.message);
+          }
           throw new Error('Pulsante messaggio non trovato');
         }
         
-        console.log('Clicking message button...');
+        console.log(`Clicking message button (found by: ${foundBySelector}) for ${profileUrl}...`);
         
         // Check page before clicking
         try {

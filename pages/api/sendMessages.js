@@ -7,8 +7,11 @@ import chromium from '@sparticuz/chromium';
 // puppeteer.use(stealth); // Rimosso
 
 export const config = {
-  maxDuration: 60,
+  maxDuration: 60, // Vercel Hobby tier max duration
 };
+
+// Helper function for random delays
+const randomDelay = (min = 500, max = 1500) => Math.floor(Math.random() * (max - min + 1)) + min;
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -27,7 +30,7 @@ export default async function handler(req, res) {
     
     const launchOptions = isDev
       ? {
-          headless: false,
+          headless: false, // Per debug locale, impostare a false per vedere il browser
           executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
           args: [
             '--no-sandbox', 
@@ -41,21 +44,19 @@ export default async function handler(req, res) {
       : {
           args: chromium.args,
           defaultViewport: chromium.defaultViewport,
-          executablePath: await chromium.executablePath(),
-          headless: chromium.headless
+          executablePath: await chromium.executablePath(), 
+          headless: chromium.headless // chromium.headless è true per Vercel
         };
 
     browser = await puppeteer.launch(launchOptions);
-    const page = await browser.newPage();
+    let page = await browser.newPage(); // `page` potrebbe essere ricreata
     
-    // Set viewport and user agent
-    await page.setViewport({ width: 1200, height: 800 });
+    await page.setViewport({ width: 1280, height: 800 }); // Un viewport comune
     await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
     
-    page.setDefaultNavigationTimeout(60000);
-    page.setDefaultTimeout(60000);
+    page.setDefaultNavigationTimeout(60000); // 60 secondi
+    page.setDefaultTimeout(30000); // 30 secondi per altre operazioni
     
-    // Parse cookies input (stringified JSON or already array)
     let cookieArrayRaw;
     if (typeof cookies === 'string') {
       try {
@@ -71,124 +72,132 @@ export default async function handler(req, res) {
     
     const cookieArray = cookieArrayRaw.map(c => {
       const { sameSite, ...rest } = c;
+      // 'lax', 'strict', 'none' sono i valori validi per sameSite
+      if (sameSite && !['Lax', 'Strict', 'None'].includes(c.sameSite)) {
+        rest.sameSite = 'None'; // Default o rimuovi se invalido. Puppeteer potrebbe gestirlo.
+      }
       return rest;
     });
     await page.setCookie(...cookieArray);
+    console.log('Cookies set.');
     
     const results = [];
-    
-    for (const { profileUrl, message } of items) {
-      try {
-        console.log(`\n=== Processing profile: ${profileUrl} ===`);
-        
-        // Check if page is still active
-        try {
-          await page.evaluate(() => document.title);
-        } catch (e) {
-          console.log('Page session lost, creating new page...');
-          await page.close();
-          page = await browser.newPage();
-          await page.setViewport({ width: 1200, height: 800 });
-          await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-          await page.setCookie(...cookieArray);
+
+    // Controllo sessione iniziale prima del loop
+    console.log('Checking initial LinkedIn session status by navigating to feed...');
+    await page.goto('https://www.linkedin.com/feed', { waitUntil: 'domcontentloaded', timeout: 45000 });
+    let currentUrl = page.url();
+    console.log(`Current URL after navigating to feed: ${currentUrl}`);
+
+    if (!currentUrl.includes('linkedin.com/feed')) {
+        if (currentUrl.includes('login') || currentUrl.includes('checkpoint') || currentUrl.includes('challenge')) {
+            console.error('LinkedIn session is invalid or requires verification. Please update cookies.');
+            await browser.close();
+            return res.status(401).json({ success: false, error: 'LinkedIn session invalid. Please re-login and update cookies.', results });
+        } else {
+            console.warn(`Navigated to feed, but URL is ${currentUrl}. Proceeding with caution, but session might be unstable.`);
+            // Potrebbe essere una pagina intermedia di LinkedIn, non necessariamente un errore di sessione grave
         }
+    }
+    console.log('Initial LinkedIn session check passed or warning issued.');
+
+    for (let i = 0; i < items.length; i++) {
+      const { profileUrl, message } = items[i];
+      try {
+        console.log(`\n=== Processing profile ${i + 1}/${items.length}: ${profileUrl} ===`);
         
+        // Controllo sessione prima di ogni profilo (opzionale se il controllo iniziale è sufficiente)
+        // Potrebbe essere troppo aggressivo, valutare se necessario
+        /*
+        if (i > 0) { // Non al primo giro
+            console.log(`Re-checking session by visiting feed before profile ${profileUrl}`);
+            await page.goto('https://www.linkedin.com/feed', { waitUntil: 'domcontentloaded', timeout: 45000 });
+            currentUrl = page.url();
+            if (!currentUrl.includes('linkedin.com/feed')) {
+                console.error(`Session lost before processing ${profileUrl}. Current URL: ${currentUrl}`);
+                throw new Error('LinkedIn session lost. Please re-login and update cookies.');
+            }
+            console.log(`Session still active. Proceeding to ${profileUrl}`);
+        }
+        */
+
+        console.log(`Navigating to profile: ${profileUrl}`);
         await page.goto(profileUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+        await page.waitForTimeout(randomDelay(4000, 7000)); // Pausa più lunga e variabile
         
-        // Wait for page to load
-        await page.waitForTimeout(3000);
-        
-        // Verify we're still on LinkedIn
-        const currentUrl = page.url();
-        if (!currentUrl.includes('linkedin.com')) {
-          console.warn(`Redirected off LinkedIn to ${currentUrl} for profile ${profileUrl}. Taking screenshot.`);
-          await page.screenshot({ path: `debug-redirected-${Date.now()}.png` });
-          throw new Error('Reindirizzato fuori da LinkedIn');
+        currentUrl = page.url();
+        console.log(`Current URL after navigating to profile ${profileUrl}: ${currentUrl}`);
+        if (!currentUrl.includes(profileUrl.split('linkedin.com')[1])) { // Verifica se siamo ancora sul profilo o reindirizzati
+            if (currentUrl.includes('login') || currentUrl.includes('checkpoint') || currentUrl.includes('challenge')) {
+                console.error(`Redirected to login/checkpoint page for profile ${profileUrl}. Session likely lost.`);
+                throw new Error('LinkedIn session lost or requires verification. Please update cookies.');
+            }
+            console.warn(`URL mismatch for profile ${profileUrl}. Expected to contain ${profileUrl.split('linkedin.com')[1]}, but got ${currentUrl}. Taking screenshot.`);
+            // await page.screenshot({ path: `debug-url-mismatch-${Date.now()}-${profileUrl.split('/').pop()}.png` });
+            // Non necessariamente un errore fatale, ma sospetto
         }
 
         // Log the beginning of the body's outerHTML for context
         try {
-          const bodyHTMLStart = await page.evaluate(() => document.body && document.body.outerHTML ? document.body.outerHTML.substring(0, 1000) : 'No body element found');
-          console.log(`Body HTML Start for ${profileUrl}: ${bodyHTMLStart}`);
+          const bodyHTMLStart = await page.evaluate(() => document.body && document.body.outerHTML ? document.body.outerHTML.substring(0, 500) : 'No body element found or body is null');
+          console.log(`Body HTML Start for ${profileUrl} (first 500 chars): ${bodyHTMLStart}`);
         } catch (htmlError) {
-          console.log(`Could not get body HTML start for ${profileUrl}:`, htmlError.message);
+          console.warn(`Could not get body HTML start for ${profileUrl}:`, htmlError.message);
         }
         
-        // Try multiple selectors for the message button
         const messageButtonSelectors = [
-          'button[data-control-name="message"]', // Specific
-          'a[data-control-name="message"]',       // Specific
-          '.pv-top-card-v2-ctas button[data-control-name="message"]', // Common on profile pages
-          'button[aria-label*="Message"]', // Case-insensitive contains "Message"
-          'button[aria-label*="Messaggio"]', // Italian
+          'button[data-control-name="message"]',
+          'a[data-control-name="message"]',
+          '.pv-top-card-v2-ctas button[data-control-name="message"]',
+          'button[aria-label*="Message"]', 
+          'button[aria-label*="Messaggio"]', 
           'button[aria-label*="Send message"]',
           'button[aria-label*="Invia messaggio"]',
-          '.pv-s-profile-actions--message', // Older selector
-          '.message-anywhere-button',       // Another common class
-          'button.artdeco-button[aria-label*="message" i]', // More general artdeco button with message in aria-label (i for case-insensitive)
+          '.pv-s-profile-actions--message',
+          '.message-anywhere-button',
+          'button.artdeco-button[aria-label*="message" i]',
           'a.artdeco-button[aria-label*="message" i]',
-          'button.pv-top-card-v2-ctas__message', // Another specific class from some layouts
-          'a.message-anywhere-button' // Ensure anchor version is also tried
-          // Add other selectors based on future findings
+          'button.pv-top-card-v2-ctas__message',
+          'a.message-anywhere-button'
         ];
         
         let messageButton = null;
         let foundBySelector = null;
+        console.log(`Searching for message button for ${profileUrl}...`);
         for (const selector of messageButtonSelectors) {
           try {
-            // console.log(`Trying message button selector: ${selector} for profile ${profileUrl}`);
-            // Wait for a short time to see if it appears, visible is important
-            await page.waitForSelector(selector, { timeout: 2000, visible: true });
+            await page.waitForSelector(selector, { timeout: 2500, visible: true }); // Aumentato leggermente timeout
             const button = await page.$(selector);
             if (button) {
-              // Additional check if it's truly visible and interactable
               const isActuallyVisible = await button.isIntersectingViewport();
               if(isActuallyVisible){
-                console.log(`Found message button with selector: ${selector} for profile ${profileUrl}`);
+                console.log(`Found message button with selector: ${selector} for ${profileUrl}`);
                 messageButton = button;
                 foundBySelector = selector;
                 break;
-              } else {
-                // console.log(`Selector ${selector} found but button not intersecting viewport.`);
-              }
+              } 
             }
           } catch (e) {
-            // console.log(`Message button selector ${selector} failed or not visible: ${e.message}`);
             continue;
           }
         }
         
-        // If no button found with selectors, try searching by text more robustly
         if (!messageButton) {
           console.log(`Message button not found by specific selectors for ${profileUrl}. Attempting text-based search.`);
           try {
             const jsHandle = await page.evaluateHandle(() => {
               const elements = Array.from(document.querySelectorAll('button, a, div[role="button"]'));
-              // console.log(`[LinkedIn Page Eval] Checking ${elements.length} elements for message button by text.`);
               let foundBtn = null;
               const keywords = ['message', 'messaggio', 'send message', 'invia messaggio']; 
-
-              for (let i = 0; i < elements.length; i++) {
-                  const elem = elements[i];
-                  let elemText = '';
-                  let ariaLabel = '';
-
-                  // Prefer innerText for visible text, fallback to textContent
-                  if (elem.innerText) elemText = elem.innerText.trim().toLowerCase();
-                  else if (elem.textContent) elemText = elem.textContent.trim().toLowerCase();
-                  
-                  if (elem.getAttribute('aria-label')) {
-                      ariaLabel = elem.getAttribute('aria-label').trim().toLowerCase();
-                  }
-
+              for (const elem of elements) {
+                  let elemText = (elem.innerText || elem.textContent || '').trim().toLowerCase();
+                  let ariaLabel = (elem.getAttribute('aria-label') || '').trim().toLowerCase();
                   for (const keyword of keywords) {
                       if (elemText.includes(keyword) || ariaLabel.includes(keyword)) {
                           const rect = elem.getBoundingClientRect();
                           const style = window.getComputedStyle(elem);
-                          const isVisible = rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none' && !elem.disabled;
-                          
-                          if (isVisible) {
-                              console.log(`[LinkedIn Page Eval] Found potential message button by text: '${keyword}' in element with text/aria: '${elemText}' / '${ariaLabel}'`);
+                          if (rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none' && !elem.disabled) {
+                              console.log(`[LinkedIn Page Eval] Potential message button by text: '${keyword}' in element: ${elem.outerHTML.substring(0,100)}`);
                               foundBtn = elem;
                               break; 
                           }
@@ -198,250 +207,219 @@ export default async function handler(req, res) {
               }
               return foundBtn;
             });
-
             const potentialButton = jsHandle.asElement();
-            if (potentialButton) {
-                // Check if it's truly visible and interactable from Puppeteer's perspective
-                if (await potentialButton.isIntersectingViewport()){
-                    console.log(`Found message button by text content and it is visible for ${profileUrl}.`);
-                    messageButton = potentialButton;
-                    foundBySelector = 'text-based search';
-                } else {
-                    console.log(`Message button found by text content for ${profileUrl}, but not visible/intersecting viewport.`);
-                    await potentialButton.dispose(); // Clean up handle
-                }
+            if (potentialButton && (await potentialButton.isIntersectingViewport())){
+                console.log(`Found message button by text content (visible) for ${profileUrl}.`);
+                messageButton = potentialButton;
+                foundBySelector = 'text-based search';
             } else {
-                console.log(`Message button not found by text content for ${profileUrl}.`);
+                if(potentialButton) await potentialButton.dispose();
+                console.log(`Message button by text content not found or not visible for ${profileUrl}.`);
             }
-            await jsHandle.dispose(); // Always dispose the JSHandle
-
+            await jsHandle.dispose();
           } catch (e) {
-            console.log(`Text search for message button failed for ${profileUrl}:`, e.message);
-            messageButton = null; 
+            console.error(`Text search for message button failed for ${profileUrl}:`, e.message);
           }
         }
         
         if (!messageButton) {
-          console.error(`Pulsante messaggio non trovato per ${profileUrl} dopo tutti i tentativi. Screenshotting...`);
-          try {
-            await page.screenshot({ path: `debug-no-message-button-${Date.now()}-${profileUrl.split('/').pop()}.png` });
-          } catch (screenshotError) {
-            console.log(`Screenshot failed for no-message-button on ${profileUrl}:`, screenshotError.message);
-          }
-          throw new Error('Pulsante messaggio non trovato');
+          console.error(`Pulsante messaggio non trovato per ${profileUrl} dopo tutti i tentativi. URL: ${page.url()}`);
+          // await page.screenshot({ path: `debug-no-message-button-${Date.now()}-${profileUrl.split('/').pop()}.png` });
+          throw new Error(`Pulsante messaggio non trovato per ${profileUrl}`);
         }
         
         console.log(`Clicking message button (found by: ${foundBySelector}) for ${profileUrl}...`);
-        
-        // Check page before clicking
-        try {
-          await page.evaluate(() => document.title);
-        } catch (e) {
-          throw new Error('Sessione pagina persa prima del click');
-        }
-        
+        await page.waitForTimeout(randomDelay());
         await messageButton.click();
         
-        // Wait for message modal/window to open
-        console.log('Waiting for modal to open...');
-        await page.waitForTimeout(5000); // Ridotto da 8 a 5 secondi
+        console.log(`Waiting for modal/messaging page to open after clicking message button for ${profileUrl}... Current URL: ${page.url()}`);
+        await page.waitForTimeout(randomDelay(4000,6000)); 
         
-        // Check if page is still active after click
-        let newUrl;
-        try {
-          newUrl = page.url();
-          await page.evaluate(() => document.title);
-        } catch (e) {
-          throw new Error('Sessione pagina persa dopo il click del pulsante messaggio');
-        }
+        currentUrl = page.url(); // Aggiorna URL dopo il click
+        console.log(`URL after clicking message button for ${profileUrl}: ${currentUrl}`);
         
-        console.log(`URL after click: ${newUrl}`);
-        
-        // If redirected to messaging page
-        if (newUrl.includes('/messaging/')) {
-          console.log('Redirected to messaging page');
-          
-          // Wait for messaging page to load
-          await page.waitForTimeout(3000);
-          
-          // Look for compose area on messaging page
+        // Scenario 1: Redirected to a dedicated messaging page (e.g., /messaging/thread/...)
+        if (currentUrl.includes('/messaging/thread/') || currentUrl.includes('/inbox/thread/')) {
+          console.log(`Redirected to messaging page: ${currentUrl} for ${profileUrl}.`);
+          await page.waitForTimeout(randomDelay(2000,4000));
+
           const messagingSelectors = [
-            '.msg-form__contenteditable',
-            '.msg-form__msg-content-container [contenteditable="true"]',
-            '.compose-publisher [contenteditable="true"]',
-            '[data-control-name="compose_message"] [contenteditable="true"]'
+            '.msg-form__contenteditable[role="textbox"]', // Main LinkedIn messaging textbox
+            'div[aria-label*="Write a message"][contenteditable="true"]', // Common aria-label
+            '[data-control-name="compose_message"] [contenteditable="true"]' // Fallback
           ];
-          
           let textbox = null;
-          let foundTextboxSelector = null;
           for (const selector of messagingSelectors) {
             try {
-              await page.waitForSelector(selector, { timeout: 5000, visible: true });
-              const element = await page.$(selector);
-              if (element) {
-                console.log(`Found messaging textbox with: ${selector}`);
-                textbox = element;
-                foundTextboxSelector = selector;
+              await page.waitForSelector(selector, { visible: true, timeout: 7000 });
+              textbox = await page.$(selector);
+              if (textbox && await textbox.isIntersectingViewport()) {
+                console.log(`Found textbox on messaging page with selector: ${selector}`);
                 break;
               }
-            } catch (e) {
-              // console.log(`Messaging textbox selector ${selector} not found or not visible.`);
-              continue;
-            }
+              textbox = null;
+            } catch (e) { continue; }
           }
-          
-          if (textbox) {
-            console.log(`Attempting to click textbox found by: ${foundTextboxSelector}`);
-            await textbox.click();
-            await page.waitForTimeout(500);
-            console.log('Typing message on messaging page...');
-            await textbox.type(message, { delay: 50 });
-            
-            // Find send button on messaging page
-            const sendBtnSelectors = ['button[data-control-name="send"]', '.msg-form__send-button'];
-            let sendBtn = null;
-            for (const sel of sendBtnSelectors) {
+
+          if (!textbox) {
+            console.error(`Textbox not found on dedicated messaging page ${currentUrl} for ${profileUrl}.`);
+            // await page.screenshot({ path: `debug-no-textbox-messaging-page-${Date.now()}.png`});
+            throw new Error('Textbox non trovata sulla pagina di messaggistica dedicata.');
+          }
+
+          console.log('Typing message on dedicated messaging page...');
+          await textbox.click({delay: randomDelay(100,300)});
+          await page.waitForTimeout(randomDelay());
+          await textbox.type(message, { delay: randomDelay(80,150) });
+          await page.waitForTimeout(randomDelay());
+
+          const sendBtnSelectors = [
+            'button[data-control-name="send"]', 
+            '.msg-form__send-button', 
+            'button[type="submit"].msg-form__send-button' // More specific
+          ];
+          let sendBtn = null;
+          for (const sel of sendBtnSelectors) {
+            try {
+                await page.waitForSelector(sel, {visible: true, timeout: 5000});
                 sendBtn = await page.$(sel);
-                if (sendBtn) {
+                if (sendBtn && await sendBtn.isIntersectingViewport()) {
                     console.log(`Found send button on messaging page with selector: ${sel}`);
                     break;
                 }
-            }
+                sendBtn = null;
+            } catch(e){ continue; }
+          }
 
-            if (sendBtn) {
-              console.log('Attempting to click send button on messaging page...');
-              await sendBtn.click();
-              await page.waitForTimeout(2000);
-              results.push({ profileUrl, status: 'sent' });
-              console.log(`Message sent to ${profileUrl} via messaging page.`);
-              continue;
-            } else {
-              console.error('Send button not found on messaging page.');
-              throw new Error('Pulsante di invio non trovato nella pagina di messaggistica');
-            }
-          } else {
-            console.error('Textbox not found on messaging page.');
-            throw new Error('Campo di testo non trovato nella pagina di messaggistica');
+          if (!sendBtn) {
+            console.error(`Send button not found on dedicated messaging page ${currentUrl} for ${profileUrl}.`);
+            // await page.screenshot({ path: `debug-no-sendbtn-messaging-page-${Date.now()}.png`});
+            throw new Error('Pulsante di invio non trovato sulla pagina di messaggistica dedicata.');
           }
+          console.log('Clicking send button on messaging page...');
+          await sendBtn.click({delay: randomDelay(100,300)});
+          await page.waitForTimeout(randomDelay(2000,3000));
+          results.push({ profileUrl, status: 'sent' });
+          console.log(`Message sent to ${profileUrl} via dedicated messaging page.`);
+          continue; // Prossimo profilo nel loop for
         }
         
-        // If not redirected or textbox not found on messaging page, try original modal approach
-        let textbox = null; // Riscopri textbox per il modale
-        let foundModalTextboxSelector = null;
-        
-        // Check for modal first
-        const modalExists = await page.evaluate(() => !!document.querySelector('.msg-overlay, .artdeco-modal, [role="dialog"]'));
-        if (!modalExists) {
-          console.log('No modal found, taking screenshot for debugging...');
-          try {
-            await page.screenshot({ path: `debug-no-modal-${Date.now()}.png` });
-          } catch (e) {
-            console.log('Screenshot failed for no-modal.');
-          }
-          throw new Error('Modal di messaggio non si è aperto o non è stato trovato');
-        }
-        console.log('Modal detected. Proceeding with modal textbox search.');
-        
-        const textboxSelectors = [
-          'div[role="textbox"][contenteditable="true"]',
-          '[contenteditable="true"][role="textbox"]',
-          '.msg-form__contenteditable',
-          'div[contenteditable="true"]',
-          '.msg-form__msg-content-container div[contenteditable="true"]',
-          '.msg-form__msg-content-container [contenteditable="true"]',
-          '.msg-overlay-conversation-bubble [contenteditable="true"]',
-          '.msg-overlay .msg-form [contenteditable="true"]'
+        // Scenario 2: Message modal/overlay on the profile page
+        console.log(`No redirect to messaging page detected. Looking for message modal on ${currentUrl} for ${profileUrl}.`);
+        await page.waitForTimeout(randomDelay(1000,2000)); // Breve attesa per il modale
+
+        const modalTextboxSelectors = [
+          '.msg-form__contenteditable[role="textbox"]', // Preferito per il modale
+          'div[role="dialog"] div[role="textbox"][contenteditable="true"]', // Dentro un dialogo
+          '.msg-overlay-conversation-bubble__content-text[contenteditable="true"]', // Un altro tipo di modale
+          '[data-testid="conversation-compose-box"] [contenteditable="true"]'
         ];
-        
-        console.log('Searching for message textbox in modal...');
-        
-        for (let idx = 0; idx < textboxSelectors.length; idx++) {
-          const selector = textboxSelectors[idx];
+        let modalTextbox = null;
+        for (const selector of modalTextboxSelectors) {
           try {
-            // console.log(`Trying modal textbox selector ${idx + 1}/${textboxSelectors.length}: ${selector}`);
-            // waitForSelector con visible: true è cruciale per elementi interattivi
-            await page.waitForSelector(selector, { timeout: 2000, visible: true }); 
-            const elements = await page.$$(selector);
-            for (const element of elements) {
-              const isActuallyVisible = await element.isIntersectingViewport();
-              if (isActuallyVisible) {
-                textbox = element;
-                foundModalTextboxSelector = selector;
-                console.log(`Found visible modal textbox with selector: ${selector}`);
-                break;
-              }
+            await page.waitForSelector(selector, { visible: true, timeout: 7000 });
+            modalTextbox = await page.$(selector);
+            if (modalTextbox && await modalTextbox.isIntersectingViewport()) {
+              console.log(`Found textbox in modal with selector: ${selector}`);
+              break;
             }
-            if (textbox) break;
-          } catch (e) {
-            // console.log(`Modal textbox selector ${selector} not found or not visible: ${e.message}`);
-            continue;
-          }
-        }
-        
-        if (!textbox) {
-          console.error(`Modal textbox not found after trying all selectors for profile ${profileUrl}.`);
-          await page.screenshot({ path: `debug-no-modal-textbox-${Date.now()}.png` });
-          throw new Error('Campo di testo per il messaggio non trovato nel modal');
-        }
-        
-        // Type the message
-        console.log(`Attempting to click modal textbox found by: ${foundModalTextboxSelector}`);
-        await textbox.click();
-        await page.waitForTimeout(500);
-        console.log('Typing message in modal...');
-        await textbox.type(message, { delay: 50 });
-        
-        // Find and click send button in modal
-        const sendButtonSelectors = ['button[data-control-name="send"]', '.msg-form__send-button', '.msg-send-button'];
-        let sendButton = null;
-        for (const sel of sendButtonSelectors) {
-            sendButton = await page.$(sel);
-            if (sendButton) {
-                // Verifichiamo che sia visibile e cliccabile
-                const isActuallyVisible = await sendButton.isIntersectingViewport();
-                if (isActuallyVisible) {
-                    console.log(`Found visible modal send button with selector: ${sel}`);
-                    break;
-                } else {
-                    console.log(`Modal send button found with ${sel} but not visible, trying next.`);
-                    sendButton = null; // Resetta se non visibile
-                }
-            }
+            modalTextbox = null;
+          } catch (e) { continue; }
         }
 
-        if (!sendButton) {
-          console.error(`Modal send button not found for profile ${profileUrl}.`);
-          await page.screenshot({ path: `debug-no-modal-send-button-${Date.now()}.png` });
-          throw new Error('Pulsante di invio non trovato nel modal');
+        if (!modalTextbox) {
+          console.error(`Modal textbox not found on ${currentUrl} for ${profileUrl}.`);
+          // await page.screenshot({ path: `debug-no-modal-textbox-${Date.now()}-${profileUrl.split('/').pop()}.png` });
+          throw new Error('Campo di testo per il messaggio non trovato nel modal.');
         }
         
-        console.log('Attempting to click modal send button...');
-        await sendButton.click();
-        await page.waitForTimeout(3000);
+        console.log('Typing message in modal...');
+        await modalTextbox.click({delay: randomDelay(100,300)});
+        await page.waitForTimeout(randomDelay());
+        await modalTextbox.type(message, { delay: randomDelay(80,150) });
+        await page.waitForTimeout(randomDelay());
+        
+        const modalSendButtonSelectors = [
+            'button[data-control-name="send"]', 
+            '.msg-form__send-button', 
+            'button[type="submit"].msg-form__send-button',
+            '[data-testid="send-button"]'
+        ];
+        let modalSendButton = null;
+        for (const sel of modalSendButtonSelectors) {
+          try {
+            await page.waitForSelector(sel, {visible: true, timeout: 5000});
+            modalSendButton = await page.$(sel);
+            if (modalSendButton && await modalSendButton.isIntersectingViewport()) {
+                console.log(`Found send button in modal with selector: ${sel}`);
+                break;
+            }
+            modalSendButton = null;
+           } catch(e){ continue; }
+        }
+
+        if (!modalSendButton) {
+          console.error(`Modal send button not found on ${currentUrl} for ${profileUrl}.`);
+          // await page.screenshot({ path: `debug-no-modal-send-button-${Date.now()}-${profileUrl.split('/').pop()}.png` });
+          throw new Error('Pulsante di invio non trovato nel modal.');
+        }
+        
+        console.log('Clicking modal send button...');
+        await modalSendButton.click({delay: randomDelay(100,300)});
+        await page.waitForTimeout(randomDelay(3000, 5000)); // Attesa più lunga per invio e chiusura modale
         
         results.push({ profileUrl, status: 'sent' });
         console.log(`Message sent to ${profileUrl} via modal.`);
         
       } catch (err) {
-        console.error(`Error sending to ${profileUrl}:`, err.message);
+        console.error(`Error sending to ${profileUrl}: ${err.message}. Current URL: ${page.url()}`);
         results.push({ profileUrl, status: 'error', error: err.message });
+        // Prova a fare uno screenshot per debugging, anche se potrebbe fallire
+        /* try {
+          const errorProfileName = profileUrl.split('/').pop() || 'unknown-profile';
+          await page.screenshot({ path: `debug-error-${Date.now()}-${errorProfileName}.png` });
+          console.log(`Screenshot attempted: debug-error-${Date.now()}-${errorProfileName}.png`);
+        } catch (screenshotError) {
+          console.warn('Screenshot failed during error handling:', screenshotError.message);
+        } */
         
-        // Try to take a screenshot for debugging
-        try {
-          await page.screenshot({ path: `debug-error-${Date.now()}.png` });
-        } catch (e) {
-          console.log('Screenshot failed');
+        // Decidi se continuare con il prossimo profilo o interrompere.
+        // Se l'errore è "LinkedIn session lost", potremmo voler interrompere tutto.
+        if (err.message.includes('LinkedIn session lost') || err.message.includes('session invalid')) {
+            console.error("Aborting due to session loss.");
+            await browser.close();
+            return res.status(401).json({ success: false, error: 'LinkedIn session lost or invalid. Please update cookies.', results });
         }
+        // Se è un errore per un singolo profilo, continua con il prossimo.
+        console.log('Continuing to next profile after error.');
+      }
+      // Pausa tra un profilo e l'altro per non sovraccaricare LinkedIn
+      if (i < items.length - 1) {
+          const interProfileDelay = randomDelay(5000, 10000);
+          console.log(`Pausing for ${interProfileDelay / 1000}s before next profile...`);
+          await page.waitForTimeout(interProfileDelay);
       }
     }
     
+    console.log('All profiles processed.');
+    await browser.close();
     return res.status(200).json({ success: true, results });
-  } catch (err) {
-    console.error('Error processing request:', err.message);
-    return res.status(500).json({ success: false, error: 'Internal Server Error' });
-  } finally {
+    
+  } catch (error) {
+    console.error('Fatal error processing sendMessages request:', error.message, error.stack);
     if (browser) {
-      await browser.close();
+        try {
+            await browser.close();
+        } catch (closeError) {
+            console.error("Error closing browser during fatal error handling:", closeError.message);
+        }
+    }
+    // Restituisci un errore generico 500 se non è già stato gestito un errore di sessione
+    if (!res.headersSent) {
+        if (error.message.includes('LinkedIn session lost') || error.message.includes('session invalid')) {
+            return res.status(401).json({ success: false, error: 'LinkedIn session lost or invalid. Please update cookies.' });
+        }
+        return res.status(500).json({ success: false, error: `Internal Server Error: ${error.message}` });
     }
   }
 }

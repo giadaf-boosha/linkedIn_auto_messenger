@@ -1,12 +1,10 @@
 import puppeteer from 'puppeteer-extra';
-import StealthPlugin from 'puppeteer-extra-plugin-stealth';
+// import StealthPlugin from 'puppeteer-extra-plugin-stealth'; // Rimosso
 import chromium from '@sparticuz/chromium';
 
-const stealth = StealthPlugin();
-// Prova a disabilitare tutte le evasioni conosciute che potrebbero dare problemi o svuotare il set
-stealth.enabledEvasions.clear(); // Rimuove tutte le evasioni abilitate
-
-puppeteer.use(stealth);
+// const stealth = StealthPlugin(); // Rimosso
+// stealth.enabledEvasions.clear(); // Rimosso
+// puppeteer.use(stealth); // Rimosso
 
 export const config = {
   maxDuration: 60,

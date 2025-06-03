@@ -1,13 +1,6 @@
 import puppeteer from 'puppeteer-extra';
-import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import chromium from '@sparticuz/chromium';
 import OpenAI from 'openai';
-
-const stealth = StealthPlugin();
-// Prova a disabilitare tutte le evasioni conosciute che potrebbero dare problemi o svuotare il set
-stealth.enabledEvasions.clear(); // Rimuove tutte le evasioni abilitate
-
-puppeteer.use(stealth);
 
 export const config = {
   maxDuration: 60,

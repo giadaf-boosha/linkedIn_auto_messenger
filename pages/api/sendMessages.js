@@ -3,7 +3,8 @@ import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import chromium from '@sparticuz/chromium';
 
 const stealth = StealthPlugin(); // Usiamo la configurazione di default
-pupeteer.use(stealth);
+stealth.enabledEvasions.delete('chrome.app');
+puppeteer.use(stealth);
 
 export const config = {
   maxDuration: 60,
